@@ -6,24 +6,24 @@ import { useUiStore } from '../../stores/ui';
 
 export function useAboutPage() {
   const ui = useUiStore();
-  const version = ref('0.1.0');
+  const version = ref('0.4.0');
   const links = [
     {
       label: 'GitHub 仓库',
-      value: 'github.com/Yuelioi/bdl',
-      url: 'https://github.com/Yuelioi/bdl',
+      value: 'github.com/daodeqing/CutFlow',
+      url: 'https://github.com/daodeqing/CutFlow',
       icon: 'i-tabler-brand-github',
     },
     {
-      label: 'Bilibili 主页',
-      value: 'space.bilibili.com/4279370',
-      url: 'https://space.bilibili.com/4279370',
+      label: 'BDL 原项目 · MIT',
+      value: 'github.com/Yuelioi/bdl',
+      url: 'https://github.com/Yuelioi/bdl',
       icon: 'i-tabler-brand-bilibili',
     },
     {
-      label: '个人网站',
-      value: 'www.yuelili.com',
-      url: 'https://www.yuelili.com',
+      label: 'Concat 原项目 · AGPL-3.0-or-later',
+      value: 'github.com/jub0t/concat',
+      url: 'https://github.com/jub0t/concat',
       icon: 'i-tabler-world-www',
     },
   ];

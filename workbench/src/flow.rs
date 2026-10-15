@@ -28,7 +28,9 @@ pub struct Model {
 }
 
 pub fn describe(id: &str, description: &str) -> Model {
-    let image = id.contains("image") || id.contains("imagen");
+    let normalized = id.to_ascii_lowercase();
+    let image = normalized.contains("image") || normalized.contains("imagen") || normalized.contains("banana");
+    let video = ["veo", "video", "t2v", "i2v", "r2v", "sora", "kling"].iter().any(|word| normalized.contains(word));
     let references = if image {
         3
     } else if id.contains("r2v") || id.contains("omni") {
@@ -47,7 +49,7 @@ pub fn describe(id: &str, description: &str) -> Model {
     Model {
         id: id.into(),
         description: description.into(),
-        kind: if image { "image" } else { "video" }.into(),
+        kind: if image { "image" } else if video { "video" } else { "unknown" }.into(),
         max_references: references,
         duration,
         aspect: if id.contains("portrait") {
@@ -173,21 +175,39 @@ impl StreamResult {
             .map_err(|_| Error::new("result_unknown", "生成服务返回无效消息，结果待核查"))?;
         if payload.get("error").is_some() {
             return Err(Error::new(
-                "provider_error",
+                match payload["error"]["code"].as_str().unwrap_or("") {
+                    "insufficient_quota" | "insufficient_credit" => "insufficient_credit",
+                    "rate_limit_exceeded" => "rate_limited",
+                    _ => "provider_error",
+                },
                 "生成服务报告失败，请在服务端核查详情与额度",
             ));
+        }
+        if payload["choices"][0]["finish_reason"].as_str().is_some_and(|reason| !reason.is_empty()) {
+            self.done = true;
         }
         if let Some(url) = payload["url"].as_str() {
             self.url = Some(url.into());
         }
-        let part = payload["choices"][0]["delta"]["content"]
-            .as_str()
-            .or_else(|| payload["choices"][0]["message"]["content"].as_str())
-            .unwrap_or("");
+        let message = payload["choices"][0].get("delta").or_else(|| payload["choices"][0].get("message"));
+        let content = message.and_then(|message| message.get("content"));
+        let part = content.and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| {
+            content.and_then(Value::as_array).map(|parts| parts.iter().filter_map(|part| part["text"].as_str()).collect::<String>()).unwrap_or_default()
+        });
+        if let Some(parts) = content.and_then(Value::as_array) {
+            for part in parts {
+                if let Some(url) = part["image_url"]["url"].as_str().or_else(|| part["video_url"]["url"].as_str()) {
+                    self.url = Some(url.into());
+                }
+            }
+        }
+        if let Some(url) = message.and_then(|message| message["images"][0]["image_url"]["url"].as_str()) {
+            self.url = Some(url.into());
+        }
         if self.content.len() + part.len() > 512 * 1024 {
             return Err(Error::new("provider_error", "生成服务响应超过安全长度"));
         }
-        self.content.push_str(part);
+        self.content.push_str(&part);
         Ok(())
     }
 
@@ -198,9 +218,11 @@ impl StreamResult {
         for pattern in [
             r#"!\[[^\]]*\]\(([^\s)]+)\)"#,
             r#"<video\b[^>]*\bsrc\s*=\s*["']([^"']+)["']"#,
+            r#"<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']"#,
+            r#"(?:https?://[^\s<>"')]+\.(?:mp4|webm|mov|png|jpe?g|webp)(?:\?[^\s<>"')]+)?)"#,
         ] {
             if let Some(found) = regex::Regex::new(pattern).unwrap().captures(&self.content) {
-                return Ok(found[1].replace("&amp;", "&"));
+                return Ok(found.get(1).unwrap_or_else(|| found.get(0).unwrap()).as_str().replace("&amp;", "&"));
             }
         }
         Err(Error::new(
@@ -241,15 +263,19 @@ pub fn generate(
     if cancel.load(Ordering::SeqCst) {
         return Err(Error::new("cancelled", "提交前已取消"));
     }
+    let mut payload = json!({"model":model,"messages":[{"role":"user","content":content}],"stream":request["stream"].as_bool().unwrap_or(true)});
+    for field in ["aspect_ratio", "duration"] {
+        if let Some(value) = request.get(field).filter(|value| !value.is_null()) {
+            payload[field] = value.clone();
+        }
+    }
     let response = agent()
         .post(&format!(
             "{}/chat/completions",
             base_url(&connection.base_url)?
         ))
         .set("Authorization", &format!("Bearer {key}"))
-        .send_json(
-            json!({"model":model,"messages":[{"role":"user","content":content}],"stream":true}),
-        )
+        .send_json(payload)
         .map_err(http_error)?;
     let streamed = response
         .header("Content-Type")
@@ -285,6 +311,9 @@ pub fn generate(
         }
         if !event.is_empty() {
             result.event(event.trim_end())?;
+        }
+        if !result.done {
+            return Err(Error::new("result_unknown", "流式响应提前结束，结果待核查；不会重新提交生成"));
         }
     } else {
         let payload: Value = serde_json::from_reader(reader)
@@ -373,6 +402,15 @@ pub fn download(
         {
             return Err(Error::new("invalid_media", "媒体地址返回了文字或错误页"));
         }
+        let destination = match response.header("Content-Type").unwrap_or("").split(';').next().unwrap_or("").trim() {
+            "image/png" => destination.with_extension("png"),
+            "image/jpeg" => destination.with_extension("jpg"),
+            "image/webp" => destination.with_extension("webp"),
+            "video/webm" => destination.with_extension("webm"),
+            "video/mp4" => destination.with_extension("mp4"),
+            "video/quicktime" => destination.with_extension("mov"),
+            _ => destination.to_path_buf(),
+        };
         std::fs::create_dir_all(
             destination
                 .parent()
@@ -405,7 +443,7 @@ pub fn download(
         }
         output.sync_all()?;
         drop(output);
-        std::fs::rename(partial, destination)?;
+        std::fs::rename(partial, &destination)?;
         return Ok(destination.to_path_buf());
     }
     Err(Error::new("invalid_media", "媒体重定向过多"))

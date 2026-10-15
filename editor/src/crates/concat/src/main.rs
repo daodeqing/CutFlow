@@ -25,6 +25,19 @@ fn main() -> Result<(), slint::PlatformError> {
     // opens, and to both after.
     concat_host::crash::catch();
     let launch = launch::parse(std::env::args_os().skip(1));
+    if let Ok(Launch::Normal(project)) = &launch {
+        if let Ok(root) = cutflow_workbench::portable_root() {
+            let request = cutflow_workbench::protocol::Call { method: "cutflow.editor.open".into(), params: serde_json::json!({"projectPath":project}) };
+            match cutflow_workbench::server::call(&root.join("editor"), &request) {
+                Ok(_) => return Ok(()),
+                Err(error) if error.code == "project_changed" => {
+                    let _ = cutflow_workbench::server::call(&root.join("editor"), &cutflow_workbench::protocol::Call { method: "cutflow.editor.focus".into(), params: serde_json::json!({}) });
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
     // Before the log, the GPU and the window: all this proves is that the
     // executable and the libraries it links were loaded, and it should
     // prove nothing else. A write that fails - a closed pipe, a GUI build

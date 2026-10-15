@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { FEEDBACK_AUTO_DISMISS_MS } from './feedback'
+import { isMobilePlatform } from '../platform/environment'
 
-export type AppTab = 'parse' | 'library' | 'transfer' | 'settings' | 'about'
+export type AppTab = 'parse' | 'library' | 'transfer' | 'settings' | 'about' | 'bilibili' | 'creation' | 'editor'
 type NavigationGuard = (leave: () => void) => void
 
 export interface ToastMessage {
@@ -18,7 +19,8 @@ export interface ToastAction {
 
 export const useUiStore = defineStore('ui', {
   state: () => ({
-    activeTab: 'parse' as AppTab,
+    activeTab: (isMobilePlatform() ? 'parse' : 'bilibili') as AppTab,
+    bilibiliSubTab: 'parse' as 'parse' | 'library' | 'transfer',
     mobilePersonalPage: 'home' as 'home' | 'settings' | 'about',
     drawerOpen: false,
     dialogOpen: false,
@@ -30,6 +32,10 @@ export const useUiStore = defineStore('ui', {
   }),
   actions: {
     setTab(tab: AppTab) {
+      if (!isMobilePlatform() && (tab === 'parse' || tab === 'library' || tab === 'transfer')) {
+        this.bilibiliSubTab = tab
+        tab = 'bilibili'
+      }
       if (tab === this.activeTab) return
       const leave = () => { this.activeTab = tab }
       const guard = this.activeTab === 'settings' ? this.settingsNavigationGuard : null

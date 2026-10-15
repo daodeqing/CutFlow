@@ -14,10 +14,10 @@ const { version, links, openLink } = useAboutPage();
           <UIcon class="size-6" name="i-tabler-chart-bar" />
         </span>
         <div class="grid min-w-0 gap-0.5">
-          <span class="about-brand text-xs font-bold text-(--color-accent-strong)">BILIBILI DOWNLOAD LAB</span>
-          <h1 class="text-balance m-0 text-2xl text-(--color-text-strong)">BDL</h1>
+          <span class="about-brand text-xs font-bold text-(--color-accent-strong)">素材 · 剪辑 · AI 创作</span>
+          <h1 class="text-balance m-0 text-2xl text-(--color-text-strong)">CutFlow</h1>
           <p class="about-tagline text-pretty m-0 text-xs leading-5 text-(--color-muted)">
-            一个专注解析、选择和稳定下载的 Bilibili 桌面工具。
+            复用 BDL 的账号下载与 Concat 的完整剪辑能力，连接你自己的 AI 创作服务。
           </p>
         </div>
       </header>
@@ -26,7 +26,7 @@ const { version, links, openLink } = useAboutPage();
         <dt class="text-(--color-muted)">当前版本</dt>
         <dd class="tabular-nums m-0 font-bold text-(--color-text)">v{{ version }}</dd>
         <dt class="text-(--color-muted)">应用名称</dt>
-        <dd class="m-0 font-bold text-(--color-text)">Bilibili Download Lab</dd>
+        <dd class="m-0 font-bold text-(--color-text)">CutFlow 0.4 · BDL (MIT) / Concat (AGPL-3.0-or-later)</dd>
       </dl>
 
       <section class="grid gap-3" aria-labelledby="creator-links-heading">

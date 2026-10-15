@@ -37,7 +37,7 @@ impl Server {
             &Discovery {
                 address: listener.local_addr()?,
                 process: std::process::id(),
-                version: "0.3".into(),
+                version: "0.4".into(),
             },
         )?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -54,9 +54,14 @@ impl Server {
                         let token = token.clone();
                         let dispatch = dispatch.clone();
                         std::thread::spawn(move || {
-                            let _ = serve(stream, &token, dispatch);
+                            if let Err(error) = serve(stream, &token, dispatch) {
+                                eprintln!("CutFlow control request: {error}");
+                            }
                             active.fetch_sub(1, Ordering::SeqCst);
                         });
+                    }
+                    Ok((stream, peer)) if peer.ip().is_loopback() => {
+                        let _ = serve(stream, &token, Arc::new(|_| Err(Error::new("busy", "本地控制请求过多，请稍后查询任务"))));
                     }
                     Ok(_) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -114,6 +119,17 @@ fn serve(mut stream: TcpStream, token: &str, dispatch: Dispatch) -> Result<()> {
 }
 
 pub fn call(root: &Path, request: &Call) -> Result<Value> {
+    match call_direct(root, request) {
+        Err(error) if error.code == "not_running" && root.file_name().is_none_or(|name| name != "editor")
+            && (request.method.starts_with("cutflow.editor.") || request.method.starts_with("cutflow.project.")
+                || request.method.starts_with("cutflow.edit.") || request.method.starts_with("cutflow.jobs.")
+                || matches!(request.method.as_str(), "cutflow.assets.import" | "cutflow.preview" | "cutflow.export.open" | "cutflow.speech.run" | "cutflow.captions.run" | "cutflow.workflow.run"))
+            && root.join("editor/automation.json").is_file() => call_direct(&root.join("editor"), request),
+        result => result,
+    }
+}
+
+fn call_direct(root: &Path, request: &Call) -> Result<Value> {
     let discovery: Discovery =
         serde_json::from_slice(&std::fs::read(root.join("automation.json")).map_err(|_| {
             Error::new(

@@ -159,7 +159,7 @@ const initializeApp = async () => {
   if (!usageNoticeOpen.value) void prepareMobileNotifications()
   await settings.initializeEnvironment()
 
-  await updater.initialize(!isMobile, isAndroidPlatform())
+  await updater.initialize(false, false)
   await account.startEventListeners()
   void account.load()
   await queue.startEventListeners()

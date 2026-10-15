@@ -2,6 +2,7 @@ import type { SelectOption } from '../../ui/Select.vue';
 import type { SettingsSection } from './settingsSections';
 
 export const settingsSections = [
+  { id: 'settings-ai', label: 'AI 服务', description: '兼容 OpenAI 的图片与视频服务', icon: 'i-tabler-sparkles' },
   { id: 'settings-download', label: '下载', description: '目录、速度与任务恢复', icon: 'i-tabler-download' },
   { id: 'settings-media', label: '下载预设', description: '内容、转换与输出流程', icon: 'i-tabler-adjustments' },
   { id: 'settings-naming', label: '文件命名', description: '模板与重名处理', icon: 'i-tabler-file-text' },

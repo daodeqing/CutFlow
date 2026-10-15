@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "BDL",
-  "version": "0.8.5",
-  "identifier": "com.yueli.bdl",
+  "productName": "CutFlow",
+  "version": "0.4.0",
+  "identifier": "com.daodeqing.cutflow",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://127.0.0.1:5173",
@@ -13,20 +13,21 @@
     "windows": [
       {
         "label": "main",
-        "title": "BDL",
-        "width": 1080,
-        "height": 720,
+        "title": "CutFlow",
+        "width": 1180,
+        "height": 760,
         "resizable": true,
         "decorations": false
       }
     ],
     "security": {
+      "assetProtocol": { "enable": true, "scope": [] },
       "csp": null
     }
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -35,16 +36,5 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJDQ0RGOUEyNDQ3MzM4NDYKUldSR09ITkVvdm5OdkVVb1hYK08yaWE0V0dvUTY5Q1V0bUs4RE5VL05jcDhjZUl3YzlydWJGV00K",
-      "endpoints": [
-        "https://github.com/Yuelioi/bdl/releases/latest/download/latest.json"
-      ],
-      "windows": {
-        "installMode": "passive"
-      }
-    }
   }
 }

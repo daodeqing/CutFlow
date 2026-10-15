@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import SettingsLeaveDialog from '../../shared/features/settings/SettingsLeaveDialog.vue';
+import SettingsAiSection from '../../shared/features/settings/SettingsAiSection.vue';
 import UiButton from '../../shared/ui/Button.vue';
 import UiInlineNotice from '../../shared/ui/InlineNotice.vue';
 import SettingsDownloadSection from '../../shared/features/settings/SettingsDownloadSection.vue';
@@ -105,6 +106,8 @@ const {
           />
 
           <SettingsMediaSection v-else-if="activeSettingsSection === 'settings-media'" :form="settingsForm" />
+
+          <SettingsAiSection v-else-if="activeSettingsSection === 'settings-ai'" />
 
           <SettingsNamingSection v-else-if="activeSettingsSection === 'settings-naming'" :form="settingsForm" />
 

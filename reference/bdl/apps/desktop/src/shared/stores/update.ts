@@ -13,7 +13,7 @@ export const useUpdateStore = defineStore('update', {
     supported: true,
     android: false,
     androidDownloadUrl: null as string | null,
-    currentVersion: '0.1.0',
+    currentVersion: '0.4.0',
     autoCheck: false,
     checking: false,
     checked: false,

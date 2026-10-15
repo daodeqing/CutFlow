@@ -9,6 +9,11 @@ pub struct Call {
 }
 
 pub const METHODS: &[(&str, &str)] = &[
+    ("cutflow.editor.open", "打开或唤起独立 Concat 剪辑器；可选 projectPath"),
+    ("cutflow.editor.status", "查询剪辑器是否运行及当前工程"),
+    ("cutflow.editor.focus", "唤起剪辑窗口"),
+    ("cutflow.editor.recents", "列出最近剪辑工程"),
+    ("cutflow.jobs.retryDownload", "只重试媒体下载，不重复提交生成；需要 jobId"),
     (
         "cutflow.project.current",
         "读取当前可见工程、document、revision 和素材 ID",
@@ -52,7 +57,7 @@ pub const METHODS: &[(&str, &str)] = &[
     ("cutflow.models.list", "从已连接 Flow2API 刷新可用模型"),
     (
         "cutflow.generate",
-        "生成素材；需要 projectPath、operationId、model、prompt、kind=image/video、maxGenerationCalls>=1，可选 references 本地图片路径数组；结果通过 jobs.get 查询",
+        "生成素材；需要 operationId、model、prompt、kind=image/video、maxGenerationCalls>=1；projectPath 可选，省略时保存到公共素材库。可选 references、stream；通过 jobs.get 查询",
     ),
     (
         "cutflow.account.start",
@@ -118,6 +123,7 @@ pub fn tools() -> Value {
             "files":{"type":"array","items":{"type":"string"}},"place":{"type":"boolean"},
             "text":{"type":"string"},"voice":{"type":"integer"},"speed":{"type":"number"},
             "modelId":{"type":"string"},"time":{"type":"number","minimum":0},
+            "stream":{"type":"boolean"},"aspect_ratio":{"type":"string"},"duration":{"type":"number","exclusiveMinimum":0},
             "command":{"type":"object"},"commands":{"type":"array","items":{"type":"object"}},
             "version":{"type":"integer","const":1},"stopAt":{"type":"string","const":"draft"},
             "scenes":{"type":"array","items":{"type":"object"}},"output":{"type":"object"},
@@ -125,6 +131,8 @@ pub fn tools() -> Value {
         },"additionalProperties":false}
         });
         let fields=match *method {
+            "cutflow.editor.status"|"cutflow.editor.focus"|"cutflow.editor.recents"=>"",
+            "cutflow.editor.open"=>"projectPath",
             "cutflow.project.current"|"cutflow.connection.get"|"cutflow.models.list"|"cutflow.account.start"|"cutflow.account.status"|"cutflow.account.logout"|"cutflow.references.list"|"cutflow.jobs.list"=>"",
             "cutflow.project.save"|"cutflow.edit.undo"|"cutflow.edit.redo"=>"projectPath operationId expectedRevision",
             "cutflow.edit.apply"=>"projectPath operationId expectedRevision command commands",
@@ -132,7 +140,7 @@ pub fn tools() -> Value {
             "cutflow.preview"=>"projectPath time",
             "cutflow.export.open"=>"projectPath",
             "cutflow.connection.save"=>"baseUrl apiKey",
-            "cutflow.generate"=>"projectPath operationId model prompt kind references maxGenerationCalls",
+            "cutflow.generate"=>"projectPath operationId model prompt kind references maxGenerationCalls stream aspect_ratio duration",
             "cutflow.account.poll"=>"sessionId",
             "cutflow.bilibili.favorites"=>"page folderId",
             "cutflow.bilibili.parse"=>"url",
@@ -148,7 +156,7 @@ pub fn tools() -> Value {
             "cutflow.assets.import"=>"projectPath operationId expectedRevision files",
             "cutflow.preview"|"cutflow.export.open"=>"projectPath",
             "cutflow.connection.save"=>"baseUrl",
-            "cutflow.generate"=>"projectPath operationId model prompt kind maxGenerationCalls",
+            "cutflow.generate"=>"operationId model prompt kind maxGenerationCalls",
             "cutflow.account.poll"=>"sessionId",
             "cutflow.bilibili.parse"=>"url",
             "cutflow.bilibili.download"=>"projectPath operationId url rights",
@@ -156,7 +164,7 @@ pub fn tools() -> Value {
             "cutflow.speech.run"=>"projectPath operationId expectedRevision text",
             "cutflow.captions.run"=>"projectPath operationId expectedRevision file",
             "cutflow.workflow.run"=>"version projectPath operationId expectedRevision scenes",
-            "cutflow.jobs.get"|"cutflow.jobs.cancel"=>"jobId",
+            "cutflow.jobs.get"|"cutflow.jobs.cancel"|"cutflow.jobs.retryDownload"=>"jobId",
             _=>"",
         };
         tool["inputSchema"]["properties"].as_object_mut().unwrap().retain(|name,_| fields.split_whitespace().any(|field|field==name));

@@ -1,4 +1,5 @@
 export type SettingsSectionId =
+  | 'settings-ai'
   | 'settings-download'
   | 'settings-media'
   | 'settings-naming'

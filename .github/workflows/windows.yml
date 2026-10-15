@@ -5,8 +5,16 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: cutflow-windows-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  windows:
+  build:
+    name: Build ${{ matrix.component }}
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [hub, editor]
     runs-on: windows-2022
     timeout-minutes: 190
     steps:
@@ -14,6 +22,57 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        if: matrix.component == 'hub'
+        with:
+          node-version: '24'
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            .build/cargo/registry
+            .build/rustup
+            .build/target
+            .build/native
+          key: windows-v4-${{ matrix.component }}-${{ hashFiles('editor/src/Cargo.lock', 'reference/bdl/Cargo.lock', 'workbench/Cargo.lock') }}
+          restore-keys: windows-v4-${{ matrix.component }}-
+      - name: Test and build component
+        run: python -B -X utf8 scripts/build_windows.py --component ${{ matrix.component }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: CutFlow-component-${{ matrix.component }}
+          path: .build/artifacts/${{ matrix.component }}/
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: CutFlow-diagnostics-${{ matrix.component }}
+          path: |
+            .build/logs/*.log
+            .build/*startup*/gui-startup.log
+            .build/artifacts/**/portable/logs/**
+          include-hidden-files: true
+          if-no-files-found: ignore
+  package:
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: CutFlow-component-hub
+          path: .build/artifacts/hub
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: CutFlow-component-editor
+          path: .build/artifacts/editor
       - name: Ensure installer compiler
         shell: pwsh
         run: |
@@ -21,24 +80,25 @@ jobs:
             choco install innosetup --no-progress -y
             if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
           }
-      - name: Build, test, smoke and package
-        run: python -B -X utf8 scripts/build_windows.py --installer
+      - name: Verify both windows, integration and package
+        run: python -B -X utf8 scripts/build_windows.py --component package --installer
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: CutFlow-0.3.0-windows-x64
+          name: CutFlow-0.4.0-windows-x64
           path: |
             dist/*.zip
             dist/*.sha256
             dist/*setup.exe
+          compression-level: 0
           if-no-files-found: error
-      - name: Upload build diagnostics
+      - name: Upload package diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: CutFlow-build-diagnostics
+          name: CutFlow-package-diagnostics
           path: |
             .build/logs/*.log
-            .build/startup-check*/gui-startup.log
+            .build/*startup*/gui-startup.log
             dist/**/portable/logs/**
           include-hidden-files: true
           if-no-files-found: ignore

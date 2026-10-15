@@ -282,9 +282,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         models: Models::new(),
     });
     Shell::install(shell.clone());
-    let downloads = downloads::Downloads::install(&app);
     let workbench = match workbench::Workbench::install(&app) {
         Ok(workbench)=>Some(workbench),
+        Err(error) if error.code == "busy" => { log::info!("editor already running"); return Ok(()); }
         Err(error)=>{log::error!("workbench: {error}");app.set_workbench_message(error.to_string().into());None}
     };
 
@@ -2023,7 +2023,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     );
 
     let result = app.run();
-    downloads.shutdown();
     if let Some(workbench)=workbench {workbench.shutdown();}
     drop(reader_sweep);
     log::info!("close: event loop exited (ok={})", result.is_ok());

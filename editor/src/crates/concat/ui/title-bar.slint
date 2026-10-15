@@ -249,11 +249,6 @@ export component TitleBar inherits Rectangle {
 
         Rectangle { horizontal-stretch: 1; }
 
-        if !root.minimal: MenuLabel {
-            label: "B站素材";
-            clicked => { root.open-downloads(); }
-        }
-
         // Beside Settings, because it is the same sort of thing: neither one
         // is about the project, both are about the window you are looking at
         // it through. A seat's own corner button changes or closes that seat;

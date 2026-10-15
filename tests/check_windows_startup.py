@@ -25,7 +25,7 @@ def check_startup(executable, state_dir, timeout_seconds, settle_seconds):
     log_path = state_dir / 'gui-startup.log'
     with log_path.open('wb') as log:
         process = subprocess.Popen([str(executable)], cwd=executable.parent, env=environment,
-                                   stdout=log, stderr=log)
+                                   stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
         windows = []
 
         @callback_type
@@ -55,7 +55,11 @@ def check_startup(executable, state_dir, timeout_seconds, settle_seconds):
             if any(user32.IsHungAppWindow(window) for window in windows):
                 raise RuntimeError('Application window is not responding.')
             for window in windows:
-                user32.PostMessageW(window, 0x0010, 0, 0)
+                title = ctypes.create_unicode_buffer(256)
+                user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+                user32.GetWindowTextW(window, title, len(title))
+                posted = user32.PostMessageW(window, 0x0010, 0, 0)
+                print(f'Window: {title.value!r}; close posted={posted}; last_error={ctypes.get_last_error()}')
             forced_shutdown = False
             try:
                 exit_code = process.wait(timeout=10)

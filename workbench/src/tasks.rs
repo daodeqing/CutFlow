@@ -85,7 +85,7 @@ impl Runtime {
         };
         for job in &mut store.jobs {
             if matches!(job.status.as_str(), "queued" | "running") {
-                job.status = if job.stage == "generating" {
+                job.status = if job.stage.starts_with("generating") {
                     "result_unknown"
                 } else {
                     "interrupted"
@@ -318,6 +318,31 @@ impl Runtime {
                 Ok(json!({"formats":text}))
             }
             "cutflow.generate" | "cutflow.bilibili.download" => self.background(method, params),
+            "cutflow.jobs.retryDownload" => {
+                let id = required(&params, "jobId")?;
+                let mut job = self.store.lock().unwrap().jobs.iter().find(|job| job.id == id).cloned()
+                    .ok_or_else(|| Error::new("not_found", "任务不存在"))?;
+                if job.method != "cutflow.generate" || matches!(job.status.as_str(), "running" | "queued" | "completed") {
+                    return Err(Error::new("invalid_request", "只有已返回媒体地址的失败生成任务可以重试下载"));
+                }
+                let folder = self.output_folder(&job)?;
+                if !folder.join("generation-result.json").is_file() {
+                    return Err(Error::new("result_unknown", "尚未收到媒体地址，请先核查服务端历史"));
+                }
+                let cancel = Arc::new(AtomicBool::new(false));
+                {
+                    let mut cancels = self.cancels.lock().unwrap();
+                    if cancels.len() >= 4 || cancels.contains_key(id) { return Err(Error::new("busy", "任务正在执行")); }
+                    cancels.insert(id.into(), cancel.clone());
+                }
+                job.status = "running".into();
+                job.stage = "downloading".into();
+                *self.store.lock().unwrap().jobs.iter_mut().find(|item| item.id == id).unwrap() = job.clone();
+                self.persist()?;
+                let runtime = self.clone();
+                std::thread::spawn(move || { let result = runtime.download_generation(&job, &folder, &cancel); runtime.finish(&job.id, result); });
+                Ok(json!({"jobId":id,"status":"running"}))
+            }
             "cutflow.jobs.list" => Ok(json!({"jobs":self.store.lock().unwrap().jobs})),
             "cutflow.jobs.get" => {
                 let store = self.store.lock().unwrap();
@@ -395,12 +420,36 @@ impl Runtime {
         }
     }
 
-    pub fn execute(&self, job: &Job, cancel: &Arc<AtomicBool>) -> Result<Value> {
-        let project = Path::new(required(&job.params, "projectPath")?).canonicalize()?;
-        if !project.is_dir() {
-            return Err(Error::new("invalid_request", "工程目录不存在"));
+    fn output_folder(&self, job: &Job) -> Result<PathBuf> {
+        if let Some(path) = job.params["projectPath"].as_str().filter(|path| !path.is_empty()) {
+            let project = Path::new(path).canonicalize()?;
+            if !project.is_dir() { return Err(Error::new("invalid_request", "工程目录不存在")); }
+            Ok(project.join("assets").join("cutflow").join(&job.id))
+        } else if job.method == "cutflow.generate" {
+            Ok(self.root.join("generated").join(&job.id))
+        } else {
+            Err(Error::new("project_required", "此操作需要 projectPath"))
         }
-        let folder = project.join("assets").join("cutflow").join(&job.id);
+    }
+
+    fn download_generation(&self, job: &Job, folder: &Path, cancel: &AtomicBool) -> Result<Value> {
+        let receipt: Value = serde_json::from_slice(&std::fs::read(folder.join("generation-result.json"))?)?;
+        let connection: flow::Connection = receipt.get("connection").cloned().map(serde_json::from_value).transpose()?
+            .unwrap_or_else(|| self.store.lock().unwrap().connection.clone());
+        let kind = required(&job.params, "kind")?;
+        let extension = if kind == "image" { "png" } else { "mp4" };
+        let path = flow::download(&connection, required(&receipt, "url")?, &folder.join(format!("generated.{extension}")), cancel)?;
+        let asset = self.probe(&path, cancel)?;
+        if (kind == "video" && (asset["duration"].as_f64().is_none() || asset["width"].as_u64().unwrap_or(0) == 0))
+            || (kind == "image" && !asset["stillImage"].as_bool().unwrap_or(false)) {
+            return Err(Error::new("invalid_media", "生成结果类型与请求不符，文件已保留供核查"));
+        }
+        let thumbnail = self.thumbnail(&path, folder, cancel);
+        Ok(json!({"assets":[asset],"thumbnail":thumbnail,"model":job.params["model"]}))
+    }
+
+    pub fn execute(&self, job: &Job, cancel: &Arc<AtomicBool>) -> Result<Value> {
+        let folder = self.output_folder(job)?;
         std::fs::create_dir_all(&folder)?;
         match job.method.as_str() {
             "cutflow.generate" => {
@@ -417,33 +466,16 @@ impl Runtime {
                 let key = self.api_key()?;
                 self.update(&job.id, "generating");
                 self.persist()?;
-                let url = flow::generate(&connection, &key, &job.params, cancel, |_message| {})?;
+                let url = flow::generate(&connection, &key, &job.params, cancel, |message| {
+                    let mut store = self.store.lock().unwrap();
+                    if let Some(current) = store.jobs.iter_mut().find(|current| current.id == job.id) { current.stage = format!("generating: {message}"); }
+                })?;
                 atomic_json(
                     &folder.join("generation-result.json"),
-                    &json!({"url":url,"model":job.params["model"]}),
+                    &json!({"url":url,"model":job.params["model"],"connection":connection}),
                 )?;
                 self.update(&job.id, "downloading");
-                let kind = job.params["kind"].as_str().unwrap_or("video");
-                let extension = if kind == "image" { "png" } else { "mp4" };
-                let path = flow::download(
-                    &connection,
-                    &url,
-                    &folder.join(format!("generated.{extension}")),
-                    cancel,
-                )?;
-                let asset = self.probe(&path, cancel)?;
-                if kind == "video"
-                    && (asset["duration"].as_f64().is_none()
-                        || asset["width"].as_u64().unwrap_or(0) == 0)
-                    || kind == "image" && !asset["stillImage"].as_bool().unwrap_or(false)
-                {
-                    return Err(Error::new(
-                        "invalid_media",
-                        "生成结果类型与请求不符，已保留下载文件供核查",
-                    ));
-                }
-                let thumbnail = self.thumbnail(&path, &folder, cancel);
-                Ok(json!({"assets":[asset],"thumbnail":thumbnail,"model":job.params["model"]}))
+                self.download_generation(job, &folder, cancel)
             }
             "cutflow.bilibili.download" => {
                 self.update(&job.id, "downloading");
@@ -454,7 +486,7 @@ impl Runtime {
                         job.params["parts"].as_str().unwrap_or("1"),
                         job.params["quality"].as_str().unwrap_or("120"),
                         job.params["allowLower"].as_bool().unwrap_or(false),
-                        project.clone(),
+                        PathBuf::from(required(&job.params, "projectPath")?),
                         required(&job.params, "rights")?,
                     )
                     .map_err(|message| Error::new("download_error", message))?;

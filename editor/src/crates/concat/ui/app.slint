@@ -17,7 +17,7 @@ import "../../concat-text/fonts/HankenGrotesk-Bold.ttf";
 import "../../concat-text/fonts/HankenGrotesk-Italic.ttf";
 
 import { DownloadDialog, DownloadJobData } from "dialogs/downloads.slint";
-import { WorkbenchPanel, WorkbenchJobData } from "dialogs/workbench.slint";
+import { WorkbenchJobData } from "dialogs/workbench.slint";
 import { Button } from "primitives/modal.slint";
 import { Theme } from "theme/theme.slint";
 import { Bezier, Curves, Fmt, Focus, Payload } from "util.slint";
@@ -701,19 +701,10 @@ export component App inherits Window {
                 toggle-maximize => { root.titlebar-toggle-maximize(); }
                 minimize => { root.titlebar-minimize(); }
                 close => { root.titlebar-close(); }
-                open-downloads => { root.download-open(); }
+                open-downloads => { root.open-settings(); }
                 open-settings => { root.open-settings(); }
                 add-pane(kind) => { Editor.dock-add(kind); }
                 export-clicked => { root.export-clicked(); }
-            }
-
-            if !root.phone: HorizontalLayout {
-                height: 36px; padding-left: 12px; padding-right: 12px; spacing: 8px;
-                Button { label: "素材"; clicked => { root.workbench-opened = false; root.download-open(); } }
-                Button { label: "AI 创作"; clicked => { root.workbench-open(); } }
-                Button { label: "剪辑"; clicked => { root.workbench-close(); } }
-                Rectangle { horizontal-stretch: 1; }
-                Text { text: root.workbench-busy ? "工作台处理中…" : "素材 · 创作 · 剪辑"; color: Theme.fg-muted; vertical-alignment: center; }
             }
 
             if root.on-start: StartScreen {
@@ -818,30 +809,9 @@ export component App inherits Window {
         again => { root.export-again(); }
     }
 
-    WorkbenchPanel {
-        x: 0; y: root.safe-area-insets.top + 68px;
-        width: root.width; height: root.height - self.y;
-        open <=> root.workbench-opened;
-        base-url <=> root.workbench-base-url; api-key <=> root.workbench-api-key;
-        model <=> root.workbench-model; prompt <=> root.workbench-prompt;
-        references <=> root.workbench-references; reference-name <=> root.workbench-reference-name;
-        reference-prompt <=> root.workbench-reference-prompt; reference-kind <=> root.workbench-reference-kind;
-        kind <=> root.workbench-kind; models: root.workbench-models;
-        model-mode <=> root.workbench-model-mode; aspect <=> root.workbench-aspect; duration <=> root.workbench-duration; capability: root.workbench-capability;
-        saved-references: root.workbench-saved-references; jobs: root.workbench-jobs;
-        message: root.workbench-message; account: root.workbench-account; qr: root.workbench-qr;
-        favorites: root.workbench-favorites; automation: root.workbench-automation;
-        favorite-folder <=> root.workbench-favorite-folder; favorite-page <=> root.workbench-favorite-page;
-        busy: root.workbench-busy; automation-enabled: root.workbench-automation-enabled;
-        closed => { root.workbench-close(); }
-        action(action) => { root.workbench-action(action); }
-        job(id, action) => { root.workbench-job(id, action); }
-        use-reference(index) => { root.workbench-use-reference(index); }
-    }
-
     download-sheet := DownloadDialog {
         x: 0; y: 0; width: root.width; height: root.height;
-        open: root.download-opened;
+        open: false;
         jobs: root.download-jobs;
         message: root.download-message;
         formats: root.download-formats;

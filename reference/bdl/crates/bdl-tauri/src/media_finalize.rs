@@ -5,6 +5,66 @@ use bdl_core::{BdlError, BdlResult};
 use std::path::PathBuf;
 use tokio::fs;
 
+pub(crate) async fn verify_media(task: &DownloadTask, ffmpeg: Option<&std::path::Path>) -> BdlResult<()> {
+    let has_video = task_has_resource_intent(task, DownloadResourceIntent::Video);
+    let has_audio = task_has_resource_intent(task, DownloadResourceIntent::Audio);
+    if !has_video && !has_audio { return Ok(()); }
+    let Some(ffmpeg) = ffmpeg else { return Ok(()); };
+    let ffprobe = ffmpeg.with_file_name(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" });
+    if !ffprobe.is_file() {
+        return Err(BdlError::Planning { message: "缺少随包 ffprobe，无法校验下载结果；请使用完整安装包。".into() });
+    }
+    let mut command = tokio::process::Command::new(ffprobe);
+    command.args(["-v", "error", "-show_format", "-show_streams", "-of", "json"]).arg(&task.output_path).kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output()).await
+        .map_err(|_| BdlError::Planning { message: "校验媒体超时，文件已保留。".into() })??;
+    if !output.status.success() {
+        return Err(BdlError::Planning { message: "下载结果无法解码，文件已保留，请重试下载。".into() });
+    }
+    let info: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|_| BdlError::Planning { message: "媒体校验信息无效。".into() })?;
+    validate_media_info(&info, has_video, has_audio, task.media_selection.video_quality == "120")
+}
+
+fn validate_media_info(info: &serde_json::Value, needs_video: bool, needs_audio: bool, strict_4k: bool) -> BdlResult<()> {
+    let failure = |message: &str| BdlError::Planning { message: message.into() };
+    let streams = info["streams"].as_array().ok_or_else(|| failure("下载结果没有媒体轨道。"))?;
+    let video = streams.iter().find(|stream| stream["codec_type"] == "video" && stream["disposition"]["attached_pic"] != 1);
+    if needs_video && video.is_none() || needs_audio && !streams.iter().any(|stream| stream["codec_type"] == "audio") {
+        return Err(failure("下载结果缺少要求的音视频轨道，文件保留供检查。"));
+    }
+    if needs_video && strict_4k {
+        let width = video.unwrap()["width"].as_u64().unwrap_or(0);
+        let height = video.unwrap()["height"].as_u64().unwrap_or(0);
+        if width.max(height) < 3840 || width.min(height) == 0 {
+            return Err(failure("下载结果实际尺寸未达到 4K，拒绝当作 4K 素材完成。"));
+        }
+    }
+    if !info["format"]["duration"].as_str().and_then(|value| value.parse::<f64>().ok()).is_some_and(|duration| duration.is_finite() && duration > 0.0) {
+        return Err(failure("下载结果没有有效时长，可能不完整。"));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod cutflow_validation_tests {
+    use super::validate_media_info;
+    use serde_json::json;
+
+    #[test]
+    fn strict_4k_validates_dimensions_and_both_tracks() {
+        let mut info = json!({"format":{"duration":"3.5"},"streams":[{"codec_type":"video","width":3840,"height":2160},{"codec_type":"audio"}]});
+        assert!(validate_media_info(&info, true, true, true).is_ok());
+        info["streams"][0]["width"] = json!(1920);
+        info["streams"][0]["height"] = json!(1080);
+        assert!(validate_media_info(&info, true, true, true).is_err());
+        assert!(validate_media_info(&info, true, true, false).is_ok());
+        info["streams"].as_array_mut().unwrap().pop();
+        assert!(validate_media_info(&info, true, true, false).is_err());
+    }
+}
+
 pub(crate) struct MuxAttachmentSelection {
     pub(crate) cover_path: Option<PathBuf>,
     pub(crate) subtitle_paths: Vec<PathBuf>,

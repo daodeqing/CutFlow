@@ -23,7 +23,7 @@ fn run() -> Result<()> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     if arguments.is_empty() || arguments.iter().any(|value| value == "--help") {
         println!(
-            "cutflow-agent 0.3.0\n  mcp [--portable DIR]\n  call METHOD --params FILE [--portable DIR]\n  call METHOD --stdin [--portable DIR]\n  schema\nOpen CutFlow independently and enable external control in its AI workspace. No Python or AI application is required to keep CutFlow running."
+            "cutflow-agent 0.4.0\n  mcp [--portable DIR]\n  call METHOD --params FILE [--portable DIR]\n  call METHOD --stdin [--portable DIR]\n  schema\nOpen CutFlow independently. Main window and editor provide separate local token channels. No Python or AI application is required to keep CutFlow running."
         );
         return Ok(());
     }

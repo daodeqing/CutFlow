@@ -1,3 +1,4 @@
+mod cutflow;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -14,46 +15,22 @@ pub fn run() {
     let builder = builder.plugin(bdl_mobile_storage::init());
 
     let builder = builder
-        .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
-
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            let download_dir = data_dir.join("downloads");
-
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            let download_dir = app
-                .path()
-                .download_dir()
-                .or_else(|_| app.path().home_dir().map(|home| home.join("Downloads")))?
-                .join("BDL");
-
-            #[cfg(target_os = "android")]
-            let state = bdl_tauri::state::AppState::new_with_platform_backends(
-                data_dir,
-                download_dir,
-                app.state::<bdl_tauri::secure_store::SecureStore>()
-                    .inner()
-                    .clone(),
-                app.state::<bdl_tauri::mobile_storage::MobileStorage>()
-                    .inner()
-                    .clone(),
-                app.state::<bdl_tauri::media_mux::MediaMuxBackend>()
-                    .inner()
-                    .clone(),
-                app.state::<bdl_tauri::task_execution::TaskExecutionBackend>()
-                    .inner()
-                    .clone(),
-            )?;
-
-            #[cfg(not(target_os = "android"))]
-            let state = bdl_tauri::state::AppState::new(data_dir, download_dir)?;
-
-            app.manage(state);
-            bdl_tauri::commands::start_queue_processing(app.handle());
-            bdl_tauri::commands::start_account_startup_verification(app.handle());
-            Ok(())
+        .setup(cutflow::install)
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let active = cutflow::active(window.app_handle());
+                eprintln!("CutFlow close requested: active tasks={active}");
+                if active {
+                    api.prevent_close();
+                    let _ = window.hide();
+                } else {
+                    api.prevent_close();
+                    cutflow::quit(window.app_handle().clone());
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
+            cutflow::cutflow_call,
             bdl_tauri::commands::parse_create_source,
             bdl_tauri::commands::parse_load_more,
             bdl_tauri::commands::parse_load_page,
@@ -115,11 +92,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init());
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let builder = builder
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+    let builder = builder.plugin(tauri_plugin_process::init());
 
     builder
         .run(tauri::generate_context!())
-        .expect("failed to run BDL app");
+        .expect("failed to run CutFlow app");
 }

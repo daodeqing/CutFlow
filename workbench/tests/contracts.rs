@@ -76,6 +76,52 @@ fn model_metadata_and_base_urls() {
     );
     assert_eq!(flow::describe("gemini-3.1-flash-image", "").kind, "image");
     assert_eq!(flow::describe("veo_3_1_t2v_fast", "").max_references, 0);
+    assert_eq!(flow::describe("my-custom-model", "").kind, "unknown");
+    assert_eq!(flow::describe("Nano-Banana-Pro", "").kind, "image");
+}
+
+#[test]
+fn non_streaming_and_structured_chat_media_are_supported() {
+    let (connection, worker) = mock(200, "application/json", json!({"choices":[{"message":{"content":[{"type":"image_url","image_url":{"url":"https://cdn.example/image.png"}}]}}]}).to_string());
+    let output = flow::generate(&connection, "test-key", &json!({"model":"custom", "prompt":"test", "stream":false}), &AtomicBool::new(false), |_| {}).unwrap();
+    assert_eq!(output, "https://cdn.example/image.png");
+    assert!(worker.join().unwrap().contains("\"stream\":false"));
+    let mut plain = StreamResult::default();
+    plain.event(&json!({"choices":[{"message":{"content":"https://cdn.example/movie.mp4?token=public"}}]}).to_string()).unwrap();
+    assert_eq!(plain.media_url().unwrap(), "https://cdn.example/movie.mp4?token=public");
+}
+
+#[test]
+fn stream_without_done_is_unknown_even_if_a_media_url_arrived() {
+    let body = format!("data: {}\n\n", json!({"choices":[{"delta":{"content":"![result](https://cdn.example/image.png)"}}]}));
+    let (connection, worker) = mock(200, "text/event-stream", body);
+    let result = flow::generate(&connection, "key", &json!({"model":"custom","prompt":"test"}), &AtomicBool::new(false), |_| {});
+    assert_eq!(result.unwrap_err().code, "result_unknown");
+    worker.join().unwrap();
+}
+
+#[test]
+fn generation_without_project_uses_public_assets_and_propagates_quota_error() {
+    let root = scratch();
+    let runtime = Runtime::open(root.clone(), root.join("tools")).unwrap();
+    let (connection, worker) = mock(402, "application/json", "{}".into());
+    runtime.dispatch("cutflow.connection.save", json!({"baseUrl":connection.base_url,"apiKey":"test-key"})).unwrap();
+    let (job, _, cancel) = runtime.reserve("cutflow.generate", json!({"operationId":"no-project","kind":"image","model":"custom","prompt":"test","maxGenerationCalls":1})).unwrap();
+    assert_eq!(runtime.execute(&job, &cancel).unwrap_err().code, "insufficient_credit");
+    assert!(root.join("generated").join(&job.id).is_dir());
+    worker.join().unwrap();
+    assert_eq!(runtime.dispatch("cutflow.jobs.retryDownload", json!({"jobId":job.id})).unwrap_err().code, "invalid_request");
+}
+
+#[test]
+fn main_and_editor_have_separate_locks_and_control_discovery() {
+    let root = scratch();
+    let main = Runtime::open(root.clone(), root.join("tools")).unwrap();
+    let editor = Runtime::open(root.join("editor"), root.join("tools")).unwrap();
+    let server = Server::start(&editor.root, Arc::new(|_| Ok(json!({"running":true})))).unwrap();
+    assert_eq!(server::call(&main.root, &Call { method:"cutflow.editor.status".into(), params:json!({}) }).unwrap()["running"], true);
+    assert!(server::call(&main.root, &Call { method:"cutflow.generate".into(), params:json!({}) }).is_err());
+    drop(server);
 }
 
 #[test]

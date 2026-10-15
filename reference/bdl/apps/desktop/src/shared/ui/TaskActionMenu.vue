@@ -3,6 +3,8 @@ import { computed } from 'vue'
 
 import type { TaskActionDescriptor, TaskActionKind, TransferTaskView } from '../stores/transferView'
 import UiIconButton from './IconButton.vue'
+import { useCutflowStore } from '../stores/cutflow'
+const cutflow = useCutflowStore()
 
 const { view, disabled = false, showPrimary = true, showInspect = false, excludeActions = [] } = defineProps<{
   view: TransferTaskView
@@ -22,6 +24,7 @@ const visibleSecondaryActions = computed(() =>
   view.secondaryActions.filter((action) => !excludeActions.includes(action.kind)),
 )
 const dropdownItems = computed(() => [
+  ...(view.isCompleted ? [{ label: '送入剪辑', icon: 'i-tabler-movie', onSelect: () => cutflow.sendToEditor([view.outputPath]) }] : []),
   ...(showInspect
     ? [{ label: '详情和诊断', icon: 'i-tabler-info-circle', color: 'neutral', onSelect: () => emit('inspect') }]
     : []),

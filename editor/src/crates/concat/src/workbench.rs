@@ -78,6 +78,13 @@ fn ui_call(call: Call) -> Result<Value> {
 }
 
 fn route(runtime: &Runtime, call: Call) -> Result<Value> {
+    if call.method.starts_with("cutflow.editor.") { return ui_call(call); }
+    if runtime.root.file_name().is_some_and(|name| name == "editor")
+        && (call.method.starts_with("cutflow.account.") || call.method.starts_with("cutflow.bilibili.")
+            || call.method.starts_with("cutflow.connection.") || call.method.starts_with("cutflow.models.")
+            || call.method.starts_with("cutflow.references.") || call.method == "cutflow.generate") {
+        return cutflow_workbench::server::call(runtime.root.parent().unwrap(), &call);
+    }
     if matches!(
         call.method.as_str(),
         "cutflow.generate" | "cutflow.bilibili.download"
@@ -169,6 +176,33 @@ impl State {
     }
 
     fn dispatch_ui(&mut self, call: Call) -> Result<Value> {
+        if call.method == "cutflow.editor.status" {
+            return Ok(json!({"running":true,"current":self.current().ok()}));
+        }
+        if matches!(call.method.as_str(), "cutflow.editor.open" | "cutflow.editor.focus") {
+            let requested = call.params["projectPath"].as_str().filter(|path| !path.is_empty());
+            if let Some(path) = requested {
+                if let Ok(current) = self.current() {
+                    if Path::new(current["projectPath"].as_str().unwrap()).canonicalize()? != Path::new(path).canonicalize()? {
+                        return Err(Error::new("project_changed", "编辑器已打开另一工程，请在编辑器内保存并切换工程后重试"));
+                    }
+                } else {
+                    let project = concat_host::projects::open(path).map_err(failure)?;
+                    let mut opened = Ok(());
+                    Shell::with(|shell, app| { opened = shell.studio.borrow_mut().open_project(project).map_err(failure); shell.studio.borrow_mut().publish(&app, &shell.models); });
+                    opened?;
+                }
+            }
+            Shell::with(|_, app| {
+                let _ = app.show();
+                #[cfg(not(any(target_os="android",target_os="ios")))]
+                {
+                    use slint::winit_030::WinitWindowAccessor;
+                    let _ = app.window().with_winit_window(|window| { window.set_minimized(false); window.focus_window(); });
+                }
+            });
+            return Ok(json!({"running":true,"current":self.current().ok()}));
+        }
         if call.method == "cutflow.project.current" {
             return self.current();
         }
@@ -678,8 +712,9 @@ impl Workbench {
     }
 
     pub fn install(app: &App) -> Result<Self> {
-        let root = cutflow_workbench::portable_root()?;
-        let tools = root.parent().unwrap().join("tools");
+        let portable = cutflow_workbench::portable_root()?;
+        let tools = portable.parent().unwrap().join("tools");
+        let root = portable.join("editor");
         let runtime = Runtime::open(root, tools)?;
         let ledger_path = runtime.root.join("operations.json");
         let (ledger, ledger_fault) = if ledger_path.exists() {
@@ -731,6 +766,12 @@ impl Workbench {
             ledger_fault,
         }));
         STATE.with(|slot| *slot.borrow_mut() = Some(state.clone()));
+        {
+            let runtime = state.borrow().runtime.clone();
+            let dispatch_runtime = runtime.clone();
+            state.borrow_mut().server = Some(cutflow_workbench::server::Server::start(&runtime.root, Arc::new(move |call| route(&dispatch_runtime, call)))?);
+            app.set_workbench_automation_enabled(true);
+        }
         {
             let weak = app.as_weak();
             app.on_workbench_open(move || {
@@ -1001,7 +1042,7 @@ fn prepare(
     speech: &Arc<concat_speech::tts::Speech>,
     transcriber: &Arc<concat_speech::transcribe::Transcriber>,
 ) -> Result<Value> {
-    let dirs = concat_host::AppDirs::under(&runtime.root);
+    let dirs = concat_host::AppDirs::under(if runtime.root.file_name().is_some_and(|name| name == "editor") { runtime.root.parent().unwrap() } else { &runtime.root });
     let project =
         Path::new(cutflow_workbench::required(&job.params, "projectPath")?).canonicalize()?;
     let project_text = project.to_string_lossy().into_owned();
@@ -1164,8 +1205,11 @@ fn prepare(
                     };
                     params["projectPath"] = json!(project_text);
                     params["operationId"] = json!(format!("{}:scene:{index}", job.operation_id));
+                    let result = if runtime.root.file_name().is_some_and(|name| name == "editor") {
+                        remote_source(runtime, method, params, cancel)?
+                    } else {
                     let (child, fresh, _child_cancel) = runtime.reserve(method, params)?;
-                    let result = if fresh {
+                    if fresh {
                         runtime.link_cancel(&child.id, cancel.clone());
                         let result = runtime.execute(&child, cancel);
                         runtime.finish(&child.id, result.clone());
@@ -1177,6 +1221,7 @@ fn prepare(
                                 "分镜上次生成中断；请检查任务历史并引用已生成素材，不会自动重发",
                             )
                         })?
+                    }
                     };
                     PathBuf::from(
                         result["assets"][0]["path"]
@@ -1245,6 +1290,24 @@ fn prepare(
         method: "cutflow.internal.assemble".into(),
         params,
     })
+}
+
+fn remote_source(runtime: &Runtime, method: &str, params: Value, cancel: &AtomicBool) -> Result<Value> {
+    let root = runtime.root.parent().ok_or_else(|| failure("主窗口数据目录不可用"))?;
+    let submitted = cutflow_workbench::server::call(root, &Call { method: method.into(), params })?;
+    let id = cutflow_workbench::required(&submitted, "jobId")?;
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            let _ = cutflow_workbench::server::call(root, &Call { method:"cutflow.jobs.cancel".into(), params:json!({"jobId":id}) });
+            return Err(Error::new("cancelled", "流程已取消，已准备素材保留"));
+        }
+        let job = cutflow_workbench::server::call(root, &Call { method:"cutflow.jobs.get".into(), params:json!({"jobId":id}) })?;
+        match job["status"].as_str().unwrap_or("result_unknown") {
+            "completed" => return Ok(job["result"].clone()),
+            "queued" | "running" => std::thread::sleep(Duration::from_millis(500)),
+            _ => return Err(Error::new(job["error"]["code"].as_str().unwrap_or("result_unknown"), job["error"]["message"].as_str().unwrap_or("素材任务中断，请在主窗口核查；不会自动重发"))),
+        }
+    }
 }
 
 fn owned_media(project: &Path, folder: &Path, source: &Path) -> Result<PathBuf> {

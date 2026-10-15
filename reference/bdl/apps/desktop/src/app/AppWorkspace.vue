@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue';
 import { useUiStore } from '../shared/stores/ui';
+import type { Component } from 'vue';
 import BackgroundParseStatus from '../shared/ui/BackgroundParseStatus.vue';
 const { mobile = false } = defineProps<{ mobile?: boolean }>();
 const ui = useUiStore();
-const desktopPages = {
+const desktopPages: Record<string, Component> = {
+  bilibili: defineAsyncComponent(() => import('../desktop/pages/BilibiliPage.vue')),
+  creation: defineAsyncComponent(() => import('../desktop/pages/CreationPage.vue')),
+  editor: defineAsyncComponent(() => import('../desktop/pages/EditorPage.vue')),
   parse: defineAsyncComponent(() => import('../desktop/pages/ParsePage.vue')),
   library: defineAsyncComponent(() => import('../desktop/pages/LibraryPage.vue')),
   transfer: defineAsyncComponent(() => import('../desktop/pages/TransferPage.vue')),
   settings: defineAsyncComponent(() => import('../desktop/pages/SettingsPage.vue')),
   about: defineAsyncComponent(() => import('../desktop/pages/AboutPage.vue')),
 };
-const mobilePages = {
+const mobilePages: Record<string, Component> = {
   parse: defineAsyncComponent(() => import('../mobile/pages/ParsePage.vue')),
   library: defineAsyncComponent(() => import('../mobile/pages/LibraryPage.vue')),
   transfer: defineAsyncComponent(() => import('../mobile/pages/TransferPage.vue')),

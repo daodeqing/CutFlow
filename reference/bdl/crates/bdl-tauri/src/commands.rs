@@ -1839,6 +1839,7 @@ pub(crate) async fn run_download_task(
     cancel_token: FetchCancelToken,
 ) -> CommandResult<()> {
     if has_recoverable_completed_output(&task).await? {
+        crate::media_finalize::verify_media(&task, runtime_options.ffmpeg_path.as_deref()).await?;
         if task.media_selection.workflow.is_none() {
             finalize_archive_assets(app, state, &task).await?;
         } else {
@@ -2012,6 +2013,7 @@ async fn run_download_task_inner(
             state.update_resource_status(&latest.id, &resource.id, ResourceStatus::Completed)?;
         }
         let verified = state.verify_task_outputs(&latest.id)?;
+        crate::media_finalize::verify_media(&verified, runtime_options.ffmpeg_path.as_deref()).await?;
         for warning in crate::workflow_execution::cleanup(&verified).await {
             emit_queue_log(app, state, &latest.id, QueueLogLevel::Warning, &warning)?;
         }
@@ -2055,6 +2057,7 @@ async fn run_download_task_inner(
         )
         .await?;
 
+    crate::media_finalize::verify_media(&latest, runtime_options.ffmpeg_path.as_deref()).await?;
     for warning in crate::media_finalize::cleanup_embedded_sources(&latest, &attachments).await {
         emit_queue_log(app, state, &latest.id, QueueLogLevel::Warning, &warning)?;
     }

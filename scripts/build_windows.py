@@ -10,124 +10,154 @@ import zipfile
 
 from dev import environment
 from prepare_native import prepare
+from prepare_webview import prepare as prepare_webview
 from recycle import recycle
 
+VERSION = '0.4.0'
 
-def build(installer, skip_smoke):
-    initial_root, initial_environment = environment()
+
+def build(installer, skip_smoke, component):
+    root, variables = environment()
     for name in ['TEMP', 'TMP', 'CARGO_HOME', 'RUSTUP_HOME', 'PYTHONDONTWRITEBYTECODE']:
-        os.environ[name] = initial_environment[name]
-    prepare()
-    root, environment_variables = environment()
-    target = Path(environment_variables['CARGO_TARGET_DIR'])
-    def run(arguments, cwd=root, process_environment=None):
-        print('Running', ' '.join(str(argument) for argument in arguments), flush=True)
-        logs=root / '.build/logs'
-        logs.mkdir(exist_ok=True)
-        log=logs / f'build-{len(list(logs.glob("build-*.log"))) + 1:03d}.log'
+        os.environ[name] = variables[name]
+    target = Path(variables['CARGO_TARGET_DIR'])
+    logs = root / '.build/logs'
+    logs.mkdir(exist_ok=True)
+
+    def run(arguments, cwd=root, env=None):
+        print('Running', ' '.join(map(str, arguments)), flush=True)
+        log = logs / f'build-{len(list(logs.glob("build-*.log"))) + 1:03d}.log'
         with log.open('wb') as output:
-            process=subprocess.Popen([str(argument) for argument in arguments], cwd=cwd,
-                                     env=environment_variables if process_environment is None else process_environment,
-                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     creationflags=subprocess.CREATE_NO_WINDOW)
+            process = subprocess.Popen(list(map(str, arguments)), cwd=cwd, env=env or variables,
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       creationflags=subprocess.CREATE_NO_WINDOW)
             for line in process.stdout:
                 output.write(line)
-                print(line.decode('utf-8',errors='replace'),end='',flush=True)
+                print(line.decode('utf-8', errors='replace'), end='', flush=True)
             process.wait()
         if process.returncode:
-            print('\n'.join(log.read_text(encoding='utf-8',errors='replace').splitlines()[-70:]),flush=True)
-            raise RuntimeError(f'Build step failed; see {log}')
-    def cargo(arguments, cwd=root):
-        run(['cargo', '+1.93.1', *arguments], cwd)
-    if not (Path(environment_variables['RUSTUP_HOME']) / 'toolchains/1.93.1-x86_64-pc-windows-msvc').is_dir():
+            raise RuntimeError(f'Build step failed: {log}')
+
+    def cargo(arguments, folder='.'):
+        run(['cargo', '+1.93.1', *arguments], root / folder)
+
+    def copy(source, destination):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+    def fresh(folder):
+        if folder.exists():
+            raise RuntimeError('Build stage exists; recycle it before rebuilding: ' + str(folder))
+        folder.mkdir(parents=True)
+
+    if component in ['hub', 'editor', 'all'] and not (Path(variables['RUSTUP_HOME']) / 'toolchains/1.93.1-x86_64-pc-windows-msvc').is_dir():
         run(['rustup', 'toolchain', 'install', '1.93.1', '--profile', 'minimal', '--no-self-update'])
-    for manifest in ['downloader', 'workbench']:
-        cargo(['test', '--locked', '--manifest-path', f'{manifest}/Cargo.toml'])
-    for manifest in ['tests/ui-compile', 'tests/native-ui']:
-        cargo(['check', '--locked', '--manifest-path', f'{manifest}/Cargo.toml'])
-    run([sys.executable, '-B', 'tests/check_callback_wiring.py'])
-    cargo(['test', '--locked', '-p', 'concat-project'], root / 'editor/src')
-    cargo(['build', '--locked', '--release', '--manifest-path', 'workbench/Cargo.toml', '--bin', 'cutflow-agent'])
-    cargo(['build', '--locked', '--release', '-p', 'bdl-cli'], root / 'reference/bdl')
-    cargo(['build', '--locked', '--profile', 'app', '-p', 'concat',
-           '--config', 'profile.app.lto="thin"',
-           '--config', 'profile.app.package.concat.opt-level=1',
-           '--config', 'profile.app.package.concat.codegen-units=16'], root / 'editor/src')
-    stage = root / 'dist/CutFlow-0.3.0-windows-x64'
-    if stage.exists():
-        raise RuntimeError('Stage already exists; recycle or rename the old bundle first: ' + str(stage))
-    tools = stage / 'tools'
-    licenses = stage / 'licenses'
-    for folder in [tools, licenses, stage / 'portable', stage / 'examples']:
-        folder.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(target / 'app/concat.exe', stage / 'CutFlow.exe')
-    shutil.copy2(target / 'release/bdl.exe', tools)
-    shutil.copy2(target / 'release/cutflow-agent.exe', tools)
-    ffmpeg = Path(environment_variables['FFMPEG_DIR'])
-    for executable in ['ffmpeg.exe', 'ffprobe.exe']:
-        shutil.copy2(ffmpeg / 'bin' / executable, tools)
-    for library in list((ffmpeg / 'bin').glob('*.dll')) + list(Path(environment_variables['SHERPA_DLL_DIR']).glob('*.dll')) + list((Path(environment_variables['ORT_DIR']) / 'lib').glob('*.dll')):
-        shutil.copy2(library, stage)
-        shutil.copy2(library, tools)
-    locator = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
-    installation = Path(subprocess.check_output([str(locator), '-latest', '-products', '*', '-property', 'installationPath'], text=True).strip())
-    runtimes = sorted(installation.glob('VC/Redist/MSVC/*/x64/Microsoft.VC14*.CRT'))
-    if not runtimes:
-        raise RuntimeError('Visual C++ runtime not found')
-    for library in runtimes[-1].glob('*.dll'):
-        shutil.copy2(library, stage)
-        shutil.copy2(library, tools)
-    for path in ['editor/LICENSE', 'editor/LICENSE-EXCEPTIONS.md', 'editor/THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES.md', 'upstreams.lock.json', 'reference/bdl/LICENSE']:
-        source = root / path
-        shutil.copy2(source, licenses / (path.replace('/', '-') if source.name in ['LICENSE', 'THIRD_PARTY_NOTICES.md'] else source.name))
-    for source in ffmpeg.rglob('*'):
-        if source.is_file() and any(word in source.name.upper() for word in ['LICENSE', 'COPYING']):
-            shutil.copy2(source, licenses / ('FFmpeg-' + source.name))
-    for name in ['onnxruntime-win-x64','sherpa-onnx-win-x64-shared-MT-Release-lib']:
-        for source in (root / '.build/native' / name).rglob('*'):
-            if source.is_file() and any(word in source.name.upper() for word in ['LICENSE','NOTICE','COPYING']):
-                shutil.copy2(source,licenses / (name + '-' + source.name))
+    artifacts = root / '.build/artifacts'
+    if component in ['hub', 'all']:
+        run([sys.executable, '-B', '-X', 'utf8', 'scripts/frontend.py', 'install', '--frozen-lockfile', '--reporter', 'append-only'])
+        run([sys.executable, '-B', '-X', 'utf8', 'scripts/frontend.py', 'test'])
+        run([sys.executable, '-B', '-X', 'utf8', 'scripts/frontend.py', 'build'])
+        cargo(['test', '--locked', '-p', 'bdl-core'], 'reference/bdl')
+        cargo(['test', '--locked', '-p', 'bdl-tauri', '--lib'], 'reference/bdl')
+        cargo(['build', '--locked', '--release', '-p', 'cutflow-desktop', '--bin', 'CutFlow'], 'reference/bdl')
+        hub = artifacts / 'hub'
+        fresh(hub)
+        copy(target / 'release/CutFlow.exe', hub / 'CutFlow.exe')
+        prepare_webview(hub / 'WebView2')
+        (hub / 'portable').mkdir()
+        if not skip_smoke:
+            run([sys.executable, '-B', 'tests/check_windows_startup.py', '--exe', hub / 'CutFlow.exe', '--state-dir', root / '.build/hub-startup'])
+            recycle(hub / 'portable')
+            (hub / 'portable').mkdir()
+    if component in ['editor', 'all']:
+        prepare()
+        root, variables = environment()
+        for manifest in ['downloader', 'workbench']:
+            cargo(['test', '--locked', '--manifest-path', f'{manifest}/Cargo.toml'])
+        for manifest in ['tests/ui-compile', 'tests/native-ui']:
+            cargo(['check', '--locked', '--manifest-path', f'{manifest}/Cargo.toml'])
+        run([sys.executable, '-B', 'tests/check_callback_wiring.py'])
+        cargo(['test', '--locked', '-p', 'concat-project'], 'editor/src')
+        cargo(['build', '--locked', '--release', '--manifest-path', 'workbench/Cargo.toml', '--bin', 'cutflow-agent'])
+        cargo(['build', '--locked', '--release', '-p', 'bdl-cli'], 'reference/bdl')
+        cargo(['build', '--locked', '--profile', 'app', '-p', 'concat', '--config', 'profile.app.lto=false',
+               '--config', 'profile.app.package.concat.opt-level=1', '--config', 'profile.app.package.concat.codegen-units=16'], 'editor/src')
+        editor = artifacts / 'editor'
+        fresh(editor)
+        tools = editor / 'tools'
+        copy(target / 'app/concat.exe', editor / 'CutFlow-editor.exe')
+        copy(target / 'app/concat.exe', tools / 'concat.exe')
+        copy(target / 'release/bdl.exe', tools / 'bdl.exe')
+        copy(target / 'release/cutflow-agent.exe', tools / 'cutflow-agent.exe')
+        ffmpeg = Path(variables['FFMPEG_DIR'])
+        for name in ['ffmpeg.exe', 'ffprobe.exe']:
+            copy(ffmpeg / 'bin' / name, tools / name)
+        libraries = list((ffmpeg / 'bin').glob('*.dll')) + list(Path(variables['SHERPA_DLL_DIR']).glob('*.dll')) + list((Path(variables['ORT_DIR']) / 'lib').glob('*.dll'))
+        for library in libraries:
+            copy(library, editor / library.name)
+            copy(library, tools / library.name)
+        locator = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Microsoft Visual Studio/Installer/vswhere.exe'
+        installation = Path(subprocess.check_output([str(locator), '-latest', '-products', '*', '-property', 'installationPath'], text=True).strip())
+        runtimes = sorted(installation.glob('VC/Redist/MSVC/*/x64/Microsoft.VC14*.CRT'))
+        if not runtimes:
+            raise RuntimeError('Visual C++ runtime not found')
+        for library in runtimes[-1].glob('*.dll'):
+            copy(library, editor / library.name)
+            copy(library, tools / library.name)
+        licenses = editor / 'licenses'
+        for path in ['editor/LICENSE', 'editor/LICENSE-EXCEPTIONS.md', 'editor/THIRD_PARTY_NOTICES.md', 'reference/bdl/LICENSE', 'THIRD_PARTY_NOTICES.md', 'upstreams.lock.json', 'docs/bdl-source-snapshot.json']:
+            copy(root / path, licenses / path.replace('/', '-'))
+        for folder in [ffmpeg, Path(variables['ORT_DIR']), Path(variables['SHERPA_DLL_DIR']).parent]:
+            for source in folder.rglob('*'):
+                if source.is_file() and any(word in source.name.upper() for word in ['LICENSE', 'NOTICE', 'COPYING']):
+                    copy(source, licenses / (folder.name + '-' + source.name))
+    if component not in ['package', 'all']:
+        return
+    stage = root / f'dist/CutFlow-{VERSION}-windows-x64'
+    fresh(stage)
+    for name in ['hub', 'editor']:
+        source = artifacts / name
+        if not source.is_dir():
+            raise RuntimeError('Missing build component: ' + name)
+        shutil.copytree(source, stage, dirs_exist_ok=True)
     for source, destination in [('README.md', '使用说明.md'), ('docs/创作与外部AI.md', '创作与外部AI.md'),
                                 ('docs/验收与已知限制.md', '验收与已知限制.md'), ('docs/SOURCE_OFFER.md', 'SOURCE_OFFER.md'),
                                 ('scripts/启动CutFlow.vbs', '启动CutFlow.vbs'), ('examples/draft.json', 'examples/draft.json')]:
-        shutil.copy2(root / source, stage / destination)
+        copy(root / source, stage / destination)
+    (stage / 'portable').mkdir(exist_ok=True)
+    if not (stage / 'WebView2/msedgewebview2.exe').is_file():
+        raise RuntimeError('Fixed WebView2 runtime missing')
     if not skip_smoke:
-        clean = environment_variables.copy()
+        clean = variables.copy()
         clean['PATH'] = os.environ.get('SystemRoot', 'C:/Windows') + '/System32'
         clean.pop('CUTFLOW_RENDERER', None)
-        for executable, arguments in [(stage / 'CutFlow.exe', ['--version']), (stage / 'CutFlow.exe', ['--smoke']),
-                                      (tools / 'bdl.exe', ['--version']), (tools / 'ffmpeg.exe', ['-version']),
-                                      (tools / 'ffprobe.exe', ['-version']), (tools / 'cutflow-agent.exe', ['schema'])]:
-            result = subprocess.run([str(executable), *arguments], env=clean, capture_output=True, timeout=120,
-                                    creationflags=subprocess.CREATE_NO_WINDOW)
-            log = root / '.build/logs' / f'smoke-{executable.stem}-{arguments[0].lstrip("-")}.log'
-            log.write_bytes(result.stdout + result.stderr)
-            if result.returncode:
-                raise RuntimeError(f'Smoke failed: {executable.name} (exit {result.returncode}): {result.stderr.decode(errors="replace")}')
-            if executable.name == 'cutflow-agent.exe':
-                json.loads(result.stdout)
-        run([sys.executable, '-B', 'tests/check_windows_startup.py', '--exe', stage / 'CutFlow.exe', '--state-dir', root / '.build/startup-check'], process_environment=clean)
+        for executable, arguments in [(stage / 'CutFlow.exe', ['--version']), (stage / 'CutFlow-editor.exe', ['--version']),
+                                      (stage / 'CutFlow-editor.exe', ['--smoke']), (stage / 'tools/bdl.exe', ['--version']),
+                                      (stage / 'tools/ffmpeg.exe', ['-version']), (stage / 'tools/ffprobe.exe', ['-version']),
+                                      (stage / 'tools/cutflow-agent.exe', ['schema'])]:
+            run([executable, *arguments], env=clean)
+        for executable in ['CutFlow.exe', 'CutFlow-editor.exe']:
+            run([sys.executable, '-B', 'tests/check_windows_startup.py', '--exe', stage / executable, '--state-dir', root / '.build' / (executable + '-startup')], env=clean)
         software = clean.copy()
         software['CUTFLOW_RENDERER'] = 'software'
-        result = subprocess.run([str(stage / 'CutFlow.exe'), '--smoke'], env=software,
-                                capture_output=True, timeout=120, creationflags=subprocess.CREATE_NO_WINDOW)
-        (root / '.build/logs/smoke-software.log').write_bytes(result.stdout + result.stderr)
-        if result.returncode:
-            raise RuntimeError(f'Software smoke failed (exit {result.returncode}): {result.stderr.decode(errors="replace")}')
-        run([sys.executable, '-B', 'tests/check_windows_startup.py', '--exe', stage / 'CutFlow.exe', '--state-dir', root / '.build/startup-check-software'], process_environment=software)
+        run([stage / 'CutFlow-editor.exe', '--smoke'], env=software)
+        run([sys.executable, '-B', 'tests/check_windows_startup.py', '--exe', stage / 'CutFlow-editor.exe', '--state-dir', root / '.build/editor-software-startup'], env=software)
+        run([sys.executable, '-B', 'tests/check_hub.py', '--stage', stage], env=clean)
         recycle(stage / 'portable')
         (stage / 'portable').mkdir()
     archive = Path(str(stage) + '.zip')
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as package:
         for source in sorted(stage.rglob('*')):
             package.write(source, source.relative_to(stage.parent))
-    digest = hashlib.file_digest(archive.open('rb'), 'sha256').hexdigest()
-    Path(str(archive) + '.sha256').write_text(digest + '  ' + archive.name + '\n', encoding='utf-8')
+    deliverables = [archive]
     if installer:
-        compiler = shutil.which('ISCC.exe') or str(root / '.build/inno/tools/ISCC.exe')
-        if not Path(compiler).is_file():
-            compiler = str(Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Inno Setup 6/ISCC.exe')
+        compiler = shutil.which('ISCC.exe') or str(Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Inno Setup 6/ISCC.exe')
         run([compiler, f'/DStage={stage}', f'/DOutput={stage.parent}', root / 'scripts/CutFlow.iss'])
+        deliverables.append(stage.parent / f'CutFlow-{VERSION}-windows-x64-setup.exe')
+    for path in deliverables:
+        with path.open('rb') as source:
+            digest = hashlib.file_digest(source, 'sha256').hexdigest()
+        Path(str(path) + '.sha256').write_text(digest + '  ' + path.name + '\n', encoding='utf-8')
     print('Built', archive, flush=True)
 
 
@@ -135,5 +165,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--installer', action='store_true')
     parser.add_argument('--skip-smoke', action='store_true')
+    parser.add_argument('--component', choices=['hub', 'editor', 'package', 'all'], default='all')
     options = parser.parse_args()
-    build(options.installer, options.skip_smoke)
+    build(options.installer, options.skip_smoke, options.component)

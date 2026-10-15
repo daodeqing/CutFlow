@@ -28,8 +28,8 @@ const { transferBadgeCount, attentionCount, queueHealthLabel, aggregateSpeedLabe
     <header class="app-titlebar" data-tauri-drag-region @dblclick="toggleMaximizeWindow">
       <div class="titlebar-brand" data-tauri-drag-region>
         <span class="titlebar-mark" aria-hidden="true"><i></i><i></i></span>
-        <strong data-tauri-drag-region>BDL</strong>
-        <span class="titlebar-name" data-tauri-drag-region>Bilibili Download Lab</span>
+        <strong data-tauri-drag-region>CutFlow</strong>
+        <span class="titlebar-name" data-tauri-drag-region>素材 · 剪辑 · AI 创作</span>
         <span class="titlebar-version tabular-nums" data-tauri-drag-region>v{{ updater.currentVersion }}</span>
       </div>
       <div class="titlebar-actions">
@@ -70,7 +70,7 @@ const { transferBadgeCount, attentionCount, queueHealthLabel, aggregateSpeedLabe
             <strong>{{ item.label }}</strong>
             <small>{{ item.description }}</small>
           </span>
-          <span v-if="item.value === 'transfer' && transferBadgeCount > 0" class="nav-badge">
+          <span v-if="item.value === 'bilibili' && transferBadgeCount > 0" class="nav-badge">
             {{ transferBadgeCount > 99 ? '99+' : transferBadgeCount }}
           </span>
         </button>
