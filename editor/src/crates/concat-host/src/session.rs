@@ -291,6 +291,10 @@ impl Session {
     }
 
     /// The document as it would be saved.
+    pub fn sandbox(&self) -> Editor {
+        self.editor.clone()
+    }
+
     pub fn document(&self) -> serde_json::Value {
         self.editor.to_document(&self.settings)
     }

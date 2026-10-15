@@ -151,11 +151,15 @@ impl MediaBin {
                 if paths.is_empty() || studio.session.is_none() {
                     return;
                 }
+                let project=std::path::PathBuf::from(studio.session.as_ref().unwrap().path());
                 spawn_in_project(
                     move || {
                         paths
                             .iter()
-                            .map(|path| media::probe(&path.to_string_lossy()))
+                            .map(|path| {
+                                let owned=cutflow_workbench::media::copy_into_project(&project,&project.join("assets/local"),path).map_err(|error|error.to_string())?;
+                                media::probe(&owned.to_string_lossy())
+                            })
                             .collect::<Vec<_>>()
                     },
                     |studio, _, _, results| studio.handle(Msg::Media(MediaMsg::Imported(results))),

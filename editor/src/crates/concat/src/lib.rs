@@ -34,6 +34,7 @@ mod ui {
 mod chips;
 mod dock;
 mod downloads;
+mod workbench;
 mod fonts;
 mod format;
 mod gpu;
@@ -282,6 +283,10 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     });
     Shell::install(shell.clone());
     let downloads = downloads::Downloads::install(&app);
+    let workbench = match workbench::Workbench::install(&app) {
+        Ok(workbench)=>Some(workbench),
+        Err(error)=>{log::error!("workbench: {error}");app.set_workbench_message(error.to_string().into());None}
+    };
 
     // The machine's fonts, for the Text inspector's picker. Read on a
     // worker: on a machine with a few thousand faces it is a moment, and
@@ -1993,6 +1998,8 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     // loop's end takes below, for the same reason - the engine's threads
     // are not waited on.
     if smoke {
+        workbench.as_ref().ok_or_else(||slint::PlatformError::Other("workbench unavailable".into()))?
+            .smoke().map_err(|error|slint::PlatformError::Other(error.to_string()))?;
         log::info!("smoke: ok");
         leave(0);
     }
@@ -2017,6 +2024,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
 
     let result = app.run();
     downloads.shutdown();
+    if let Some(workbench)=workbench {workbench.shutdown();}
     drop(reader_sweep);
     log::info!("close: event loop exited (ok={})", result.is_ok());
     // The loop failing is the window never having run at all - on a phone

@@ -38,7 +38,7 @@ fn main() {
     let start = source
         .find("    in-out property <bool> download-opened;")
         .unwrap();
-    let end = source[start..].find("    // ── the launch screen").unwrap() + start;
+    let end = source[start..].find("    in-out property <bool> workbench-opened;").unwrap() + start;
     let props = &source[start..end];
     let start = source
         .find("    download-sheet := DownloadDialog {")

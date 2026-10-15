@@ -2354,6 +2354,8 @@ impl Studio {
         }
     }
 
+    pub(crate) fn edit_revision(&self) -> u64 { self.revision }
+
     pub fn apply(&mut self, command: Command) -> Option<String> {
         // An edit ends whatever burst the view was in.
         self.end_burst();

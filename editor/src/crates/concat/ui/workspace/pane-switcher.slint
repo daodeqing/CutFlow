@@ -7,6 +7,7 @@ import { Glyph, Icon } from "../icons.slint";
 import { Payload } from "../util.slint";
 import { Tip } from "../primitives/tooltip.slint";
 import { PaneScroll } from "pane.slint";
+import { Button } from "../primitives/modal.slint";
 
 // Which editor a seat is showing, and the control that changes it.
 //
@@ -44,6 +45,7 @@ export enum PaneKind {
 }
 
 export global Panes {
+    in-out property <bool> advanced;
     /// The window's height, published by the App (app.slint, `changed
     /// height`) because nothing below the Window can read it: a menu hung
     /// under a button measures the room beneath it against this. Zero
@@ -394,12 +396,12 @@ export component PaneSwitcher inherits Rectangle {
                         current: root.kind == PaneKind.inspector;
                         chosen => { menu.close(); root.picked(PaneKind.inspector); }
                     }
-                    SwitchRow {
+                    if Panes.advanced || root.kind == PaneKind.keyframes: SwitchRow {
                         kind: PaneKind.keyframes;
                         current: root.kind == PaneKind.keyframes;
                         chosen => { menu.close(); root.picked(PaneKind.keyframes); }
                     }
-                    SwitchRow {
+                    if Panes.advanced || root.kind == PaneKind.meters: SwitchRow {
                         kind: PaneKind.meters;
                         current: root.kind == PaneKind.meters;
                         chosen => { menu.close(); root.picked(PaneKind.meters); }
@@ -410,6 +412,7 @@ export component PaneSwitcher inherits Rectangle {
                         chosen => { menu.close(); root.picked(PaneKind.timeline); }
                     }
 
+                    Button { label: Panes.advanced ? "收起进阶工具" : "进阶工具"; clicked => { Panes.advanced = !Panes.advanced; } }
                     SwitchDivider { }
 
                     RemoveRow {
@@ -503,11 +506,11 @@ export component AddPaneButton inherits Rectangle {
                         kind: PaneKind.inspector;
                         chosen => { menu.close(); root.added(PaneKind.inspector); }
                     }
-                    SwitchRow {
+                    if Panes.advanced: SwitchRow {
                         kind: PaneKind.keyframes;
                         chosen => { menu.close(); root.added(PaneKind.keyframes); }
                     }
-                    SwitchRow {
+                    if Panes.advanced: SwitchRow {
                         kind: PaneKind.meters;
                         chosen => { menu.close(); root.added(PaneKind.meters); }
                     }
@@ -515,6 +518,7 @@ export component AddPaneButton inherits Rectangle {
                         kind: PaneKind.timeline;
                         chosen => { menu.close(); root.added(PaneKind.timeline); }
                     }
+                    Button { label: Panes.advanced ? "收起进阶工具" : "进阶工具"; clicked => { Panes.advanced = !Panes.advanced; } }
                 }
             }
         }

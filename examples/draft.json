@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "projectPath": "D:/CutFlowProjects/示例工程",
+  "operationId": "example-draft-001",
+  "expectedRevision": 0,
+  "maxGenerationCalls": 0,
+  "voice": 45,
+  "subtitles": true,
+  "stopAt": "draft",
+  "output": {"width": 1920, "height": 1080, "rateNum": 30, "rateDen": 1},
+  "scenes": [
+    {
+      "id": "opening",
+      "source": {"kind": "local", "path": "D:/素材/开场.mp4"},
+      "sourceStart": 0,
+      "narration": "你好，这是我的第一个剪辑草稿。"
+    }
+  ]
+}

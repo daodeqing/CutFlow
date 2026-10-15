@@ -1,0 +1,199 @@
+import { ScrollView, ComboBox, CheckBox, LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme/theme.slint";
+import { Button } from "../primitives/modal.slint";
+
+export struct WorkbenchJobData {
+    id: string, title: string, status: string, detail: string,
+    path: string, thumbnail: image, completed: bool, running: bool,
+}
+
+export component WorkbenchPanel inherits Rectangle {
+    in-out property <bool> open;
+    in-out property <string> base-url;
+    in-out property <string> api-key;
+    in-out property <string> prompt;
+    in-out property <string> model;
+    in-out property <string> references;
+    in-out property <string> reference-name;
+    in-out property <string> reference-prompt;
+    in-out property <int> reference-kind;
+    in-out property <int> kind;
+    in-out property <int> model-mode;
+    in-out property <int> aspect;
+    in-out property <int> duration;
+    in property <string> capability;
+    in property <[string]> models;
+    in property <[string]> saved-references;
+    in property <[WorkbenchJobData]> jobs;
+    in property <string> message;
+    in property <string> account;
+    in property <image> qr;
+    in property <string> favorites;
+    in-out property <string> favorite-folder;
+    in-out property <string> favorite-page: "1";
+    in property <string> automation;
+    in property <bool> busy;
+    in property <bool> automation-enabled;
+    callback closed();
+    callback action(string);
+    callback job(string, string);
+    callback use-reference(int);
+    property <int> tab;
+    visible: root.open;
+    background: Theme.page;
+    TouchArea { }
+    VerticalLayout {
+        padding: 16px; spacing: 12px;
+        HorizontalLayout {
+            height: 36px; spacing: 8px;
+            Text { text: "CutFlow 创作工作台"; color: Theme.fg; font-size: 19px; font-weight: 600; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Button { label: "图片与视频"; clicked => { root.tab = 0; } }
+            Button { label: "B站账号"; clicked => { root.tab = 1; } }
+            Button { label: "角色与场景"; clicked => { root.tab = 2; } }
+            Button { label: "连接与外部 AI"; clicked => { root.tab = 3; } }
+            Button { label: "返回剪辑"; clicked => { root.closed(); } }
+        }
+        if root.tab == 0: HorizontalLayout {
+            spacing: 16px;
+            ScrollView {
+                width: 340px;
+                VerticalLayout {
+                spacing: 10px;
+                Text { text: "生成新素材"; color: Theme.fg; font-size: 16px; }
+                ComboBox { model: ["图片", "视频"]; current-index <=> root.kind; }
+                ComboBox { model: root.models; selected(value) => { root.model = value; } }
+                Text { text: "模型 ID（可手动填写兼容名称）"; color: Theme.fg-muted; font-size: 12px; }
+                if root.kind == 1: ComboBox { model: ["全部视频模型", "文生视频", "图生视频 / 参考图视频"]; current-index <=> root.model-mode; }
+                HorizontalLayout {
+                    ComboBox { model: ["全部比例", "横屏 16:9", "竖屏 9:16", "方形 1:1"]; current-index <=> root.aspect; }
+                    if root.kind == 1: ComboBox { model: ["全部时长", "4 秒", "6 秒", "8 秒", "10 秒"]; current-index <=> root.duration; }
+                }
+                LineEdit { text <=> root.model; }
+                Text { text: root.capability; color: Theme.fg-muted; font-size: 12px; wrap: word-wrap; }
+                Text { text: "提示词"; color: Theme.fg; }
+                Rectangle {
+                    height: 160px; background: Theme.field; border-radius: 6px;
+                    TextInput { x: 10px; y: 8px; width: parent.width - 20px; height: parent.height - 16px;
+                        text <=> root.prompt; color: Theme.fg; wrap: word-wrap; }
+                }
+                Text { text: "参考图片路径，每行一张"; color: Theme.fg; }
+                Rectangle {
+                    height: 70px; background: Theme.field; border-radius: 6px;
+                    TextInput { x: 8px; y: 6px; width: parent.width - 16px; height: parent.height - 12px;
+                        text <=> root.references; color: Theme.fg; wrap: word-wrap; }
+                }
+                HorizontalLayout {
+                    spacing: 6px;
+                    Button { label: "选择参考图"; clicked => { root.action("browse"); } }
+                    Button { label: "刷新模型"; enabled: !root.busy; clicked => { root.action("models"); } }
+                }
+                Button { label: "生成一次 · 使用服务额度"; enabled: !root.busy && root.prompt != "" && root.model != "";
+                    clicked => { root.action("generate"); } }
+                Text { text: "仅上传本任务选定的参考图。取消等待不保证服务端停单或退款。";
+                    color: Theme.fg-muted; font-size: 12px; wrap: word-wrap; }
+                Rectangle { vertical-stretch: 1; }
+                }
+            }
+            ScrollView {
+                horizontal-stretch: 1;
+                VerticalLayout {
+                    spacing: 10px;
+                    Text { text: "素材与任务"; color: Theme.fg; font-size: 16px; }
+                    for job in root.jobs: Rectangle {
+                        height: 146px; background: Theme.panel; border-radius: 8px;
+                        HorizontalLayout {
+                            padding: 10px; spacing: 10px;
+                            Image { source: job.thumbnail; width: 140px; image-fit: contain; }
+                            VerticalLayout {
+                                spacing: 5px;
+                                Text { text: job.title; color: Theme.fg; overflow: elide; }
+                                Text { text: job.status; color: Theme.accent; }
+                                Text { text: job.detail; color: Theme.fg-muted; font-size: 12px; wrap: word-wrap; }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Button { label: "加入素材库"; enabled: job.completed; clicked => { root.job(job.id, "import"); } }
+                                    Button { label: "放入时间线"; enabled: job.completed; clicked => { root.job(job.id, "place"); } }
+                                    Button { label: "取消"; enabled: job.running; clicked => { root.job(job.id, "cancel"); } }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+        }
+        if root.tab == 1: HorizontalLayout {
+            spacing: 20px;
+            VerticalLayout {
+                width: 300px; spacing: 12px;
+                Text { text: root.account; color: Theme.fg; wrap: word-wrap; }
+                Image { source: root.qr; width: 240px; height: 240px; image-fit: contain; }
+                Button { label: "扫码登录 / 刷新二维码"; enabled: !root.busy; clicked => { root.action("login"); } }
+                Button { label: "检查扫码结果"; enabled: !root.busy; clicked => { root.action("poll"); } }
+                Button { label: "检查账号状态"; enabled: !root.busy; clicked => { root.action("account"); } }
+                Button { label: "退出账号"; enabled: !root.busy; clicked => { root.action("logout"); } }
+                Text { text: "会员不保证每条视频都有 4K，以解析结果和实际文件为准。"; color: Theme.fg-muted; wrap: word-wrap; }
+                Rectangle { vertical-stretch: 1; }
+            }
+            VerticalLayout {
+                spacing: 12px;
+                HorizontalLayout {
+                    Button { label: "我的收藏夹"; enabled: !root.busy; clicked => { root.action("favorites"); } }
+                    Button { label: "打开B站素材下载"; clicked => { root.action("downloads"); } }
+                }
+                HorizontalLayout {
+                    LineEdit { text <=> root.favorite-folder; placeholder-text: "收藏夹 ID（留空列出收藏夹）"; }
+                    LineEdit { text <=> root.favorite-page; placeholder-text: "页码"; preferred-width: 70px; }
+                    Button { label: "读取内容"; enabled: !root.busy; clicked => { root.action("favorite-items"); } }
+                }
+                ScrollView { TextInput { text: root.favorites; read-only: true; color: Theme.fg; wrap: word-wrap; } }
+                Text { text: "复制收藏夹中的来源链接，或让外部 AI 解析并选择分 P 下载。"; color: Theme.fg-muted; wrap: word-wrap; }
+            }
+        }
+        if root.tab == 2: HorizontalLayout {
+            spacing: 20px;
+            VerticalLayout {
+                width: 360px; spacing: 12px;
+                Text { text: "保存角色或场景参考图"; color: Theme.fg; font-size: 16px; }
+                ComboBox { model: ["角色", "场景"]; current-index <=> root.reference-kind; }
+                LineEdit { text <=> root.reference-name; placeholder-text: "参考素材名称"; }
+                LineEdit { text <=> root.reference-prompt; placeholder-text: "外观、场景与风格描述"; }
+                LineEdit { text <=> root.references; placeholder-text: "本地参考图路径"; }
+                Button { label: "选择参考图"; clicked => { root.action("browse"); } }
+                Button { label: "保存本地参考素材"; enabled: !root.busy; clicked => { root.action("reference-save"); } }
+                Text { text: "复用参考图辅助保持一致，但不保证人物外观完全一致。"; color: Theme.fg-muted; wrap: word-wrap; }
+                Rectangle { vertical-stretch: 1; }
+            }
+            ScrollView {
+                VerticalLayout {
+                    spacing: 8px;
+                    for label[index] in root.saved-references: Button { label: label; clicked => { root.use-reference(index); } }
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+        }
+        if root.tab == 3: VerticalLayout {
+            spacing: 12px;
+            Text { text: "Flow2API · OpenAI 兼容接口"; color: Theme.fg; font-size: 17px; }
+            Text { text: "服务地址（例如 http://127.0.0.1:8000/v1）"; color: Theme.fg; }
+            LineEdit { text <=> root.base-url; }
+            Text { text: "API Key（留空保留已有密钥）"; color: Theme.fg; }
+            LineEdit { text <=> root.api-key; input-type: password; }
+            HorizontalLayout {
+                Button { label: "加密保存连接"; enabled: !root.busy; clicked => { root.action("connection-save"); } }
+                Button { label: "测试连接并刷新模型"; enabled: !root.busy; clicked => { root.action("models"); } }
+            }
+            Text { text: "外部 AI 控制"; color: Theme.fg; font-size: 17px; }
+            Button { label: root.automation-enabled ? "关闭外部控制" : "启用本地 MCP / 命令行控制"; clicked => { root.action("automation"); } }
+            Text { text: root.automation; color: Theme.fg-muted; wrap: word-wrap; }
+            Text { text: "外部 AI 可修改当前时间线。草稿默认等待人工检查和导出；关闭 AI 客户端不影响 CutFlow。"; color: Theme.fg; wrap: word-wrap; }
+            Rectangle { vertical-stretch: 1; }
+        }
+        HorizontalLayout {
+            height: 42px; spacing: 10px;
+            Text { text: root.message; color: Theme.fg; wrap: word-wrap; horizontal-stretch: 1; }
+            Button { label: "刷新任务"; clicked => { root.action("refresh"); } }
+        }
+    }
+}

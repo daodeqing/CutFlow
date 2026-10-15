@@ -542,14 +542,24 @@ impl State {
             let results = job
                 .assets
                 .iter()
-                .map(|a| {
+                .enumerate()
+                .map(|(index,a)| {
                     if flag.load(Ordering::SeqCst) {
                         return Err("已停止入库".into());
                     }
                     if std::fs::metadata(&a.path).map(|m| m.len()).ok() != Some(a.bytes) {
                         return Err("媒体已改变或丢失，请检查母版文件。".into());
                     }
-                    media::probe(&a.path.to_string_lossy())
+                    let folder=job.target.join("assets/bilibili").join(&job.id);
+                    std::fs::create_dir_all(&folder).map_err(|error|error.to_string())?;
+                    let target=folder.join(format!("source-{index}.{}",a.path.extension().and_then(|extension|extension.to_str()).unwrap_or("mp4")));
+                    if !target.exists() {
+                        let partial=target.with_extension("part");
+                        std::fs::copy(&a.path,&partial).map_err(|error|error.to_string())?;
+                        std::fs::rename(&partial,&target).map_err(|error|error.to_string())?;
+                    }
+                    if std::fs::metadata(&target).map(|metadata|metadata.len()).ok()!=Some(a.bytes) {return Err("工程素材已变化，请核查文件后重试入库".into());}
+                    media::probe(&target.to_string_lossy())
                 })
                 .collect();
             Done::Probed(job.id, results)
@@ -604,12 +614,12 @@ impl State {
             if !commands.is_empty() {
                 studio.apply(Command::Batch { commands });
             }
-            if !job.assets.iter().all(|a| {
+            if !summaries.iter().all(|summary| {
                 studio
                     .project()
                     .media
                     .iter()
-                    .any(|m| same_path(Path::new(&m.path), &a.path))
+                    .any(|m| same_path(Path::new(&m.path), Path::new(&summary.path)))
             }) {
                 result = Err("部分素材被编辑器拒绝，请检查格式兼容性。".into());
                 return;
@@ -908,12 +918,9 @@ pub struct Downloads {
 }
 impl Downloads {
     pub fn install(app: &App) -> Self {
-        let root = std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("XDG_STATE_HOME").map(PathBuf::from))
-            .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/state")))
-            .unwrap_or_else(std::env::temp_dir)
-            .join("CutFlow");
+        let root = std::env::current_exe().ok()
+            .and_then(|path| path.parent().map(|parent|parent.join("portable/localappdata/CutFlow")))
+            .unwrap_or_else(|| PathBuf::from("portable/localappdata/CutFlow"));
         let tools = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.join("tools")))

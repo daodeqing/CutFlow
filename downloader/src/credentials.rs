@@ -41,12 +41,12 @@ pub fn clear(root: &Path) -> Result<()> {
 }
 
 #[cfg(not(windows))]
-fn protect(_: &[u8], _: bool) -> Result<Vec<u8>> {
+pub fn protect(_: &[u8], _: bool) -> Result<Vec<u8>> {
     Err("本版本的凭据存储仅支持 Windows DPAPI；未保存明文凭据".into())
 }
 
 #[cfg(windows)]
-fn protect(bytes: &[u8], encrypt: bool) -> Result<Vec<u8>> {
+pub fn protect(bytes: &[u8], encrypt: bool) -> Result<Vec<u8>> {
     use std::ptr::{null, null_mut};
     #[repr(C)]
     struct Blob {

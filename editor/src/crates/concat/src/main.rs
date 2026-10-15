@@ -12,6 +12,13 @@ mod launch;
 use launch::Launch;
 
 fn main() -> Result<(), slint::PlatformError> {
+    #[cfg(target_os = "windows")]
+    {
+        let root=cutflow_workbench::portable_root().map_err(|error|slint::PlatformError::Other(error.to_string()))?;
+        let temp=root.join("temp");
+        std::fs::create_dir_all(&temp).map_err(|error|slint::PlatformError::Other(format!("无法创建 portable 数据目录：{error}")))?;
+        unsafe {std::env::set_var("TEMP",&temp);std::env::set_var("TMP",&temp);}
+    }
     // First of all, so that even `--version` says where it crashed if it
     // does: v0.2.7-rc.4's Windows on ARM build died there with nothing
     // but an exit code (#326). It writes to standard error until the log

@@ -5,3 +5,6 @@ dist/
 queue.json
 bdl-state.json
 **/flightdeck/
+.build/
+**/__pycache__/
+**/portable/

@@ -1,0 +1,29 @@
+[package]
+name = "cutflow-workbench"
+version = "0.3.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+
+[workspace]
+
+[[bin]]
+name = "cutflow-agent"
+path = "src/agent.rs"
+
+[dependencies]
+base64 = "0.22"
+cutflow-download = { path = "../downloader" }
+concat-project = { path = "../editor/src/crates/concat-project" }
+bdl-core = { path = "../reference/bdl/crates/bdl-core" }
+bpi-rs = { path = "../reference/bdl/vendor/bpi-rs", default-features = false, features = ["login"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+ureq = { version = "2", features = ["json"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[patch.crates-io]
+bpi-rs = { path = "../reference/bdl/vendor/bpi-rs" }

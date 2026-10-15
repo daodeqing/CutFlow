@@ -136,4 +136,5 @@ incremental = false
 # on a low-density screen (see patches/README.md). The copy is 1.18.1 exactly;
 # bump it with Slint, re-applying the change.
 [patch.crates-io]
+bpi-rs = { path = "../../reference/bdl/vendor/bpi-rs" }
 i-slint-renderer-skia = { path = "patches/i-slint-renderer-skia" }
