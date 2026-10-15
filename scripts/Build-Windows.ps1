@@ -44,6 +44,7 @@ try {
     Copy-Item 'README.md' "$stage\使用说明.md"
     Copy-Item 'docs\验收与已知限制.md' "$stage\验收与已知限制.md"
     Copy-Item 'docs\SOURCE_OFFER.md' "$stage\SOURCE_OFFER.md"
+    Copy-Item "$PSScriptRoot\启动CutFlow.vbs" "$stage\启动CutFlow.vbs"
     foreach ($file in Get-ChildItem $env:FFMPEG_DIR -File -Recurse | Where-Object { $_.Name -match 'LICENSE|COPYING' }) {
         Copy-Item $file.FullName "$stage\licenses\FFmpeg-$($file.Name)" -Force
     }

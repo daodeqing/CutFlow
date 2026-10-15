@@ -19,6 +19,10 @@ changes, all marked `Concat:` in the source:
   everywhere else. Not LCD everywhere: on a surface with no order Skia
   derives greyscale from LCD rendering, which on macOS turns on CoreText's
   font smoothing and draws text heavier.
+  On Windows the properties are read with `Canvas::props()`, whose output is passed by
+  pointer. `Canvas::top_props()` returns a C++ struct by value; with the
+  current Windows MSVC bindings its hidden return pointer and `this` are
+  reversed, causing an access violation when the first text is rendered.
 - `wgpu_30_surface/dx12.rs`, `system_text_props`, and its caller
   `make_swapchain_surface`: the Windows window's surface carries the
   desk's ClearType settings (on or off, RGB or BGR), so its text is drawn
