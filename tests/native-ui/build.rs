@@ -1,3 +1,10 @@
+fn slint_import_path(relative: &str) -> String {
+    let p = std::path::PathBuf::from(relative).canonicalize().unwrap();
+    let s = p.to_string_lossy().to_string();
+    let stripped = s.strip_prefix(r"\\?\").unwrap_or(&s);
+    stripped.replace('\\', "/")
+}
+
 fn main() {
     let compile = |path| {
         let config = slint_build::CompilerConfiguration::new()
@@ -7,15 +14,18 @@ fn main() {
     let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     let font_import = std::env::var("CUTFLOW_UI_FONT")
         .ok()
-        .map(|font| format!("import {:?};\n", font))
+        .map(|font| {
+            let clean = font.strip_prefix(r"\\?\").unwrap_or(&font).replace('\\', "/");
+            format!("import \"{clean}\";\n")
+        })
         .unwrap_or_default();
     let mut preview = std::fs::read_to_string("ui.slint").unwrap();
     for file in ["dialogs/downloads.slint", "theme/theme.slint"] {
         let relative = format!("../../editor/src/crates/concat/ui/{file}");
-        let absolute = std::path::PathBuf::from(&relative).canonicalize().unwrap();
+        let absolute = slint_import_path(&relative);
         preview = preview.replace(
             &format!("\"{relative}\""),
-            &format!("{:?}", absolute.to_string_lossy()),
+            &format!("\"{absolute}\""),
         );
     }
     let preview_file = out_dir.join("ui.slint");
@@ -35,17 +45,10 @@ fn main() {
         .unwrap();
     let end = source[start..].find("    SettingsDialog {").unwrap() + start;
     let dialog = &source[start..end];
-    let dialog_file =
-        std::path::PathBuf::from("../../editor/src/crates/concat/ui/dialogs/downloads.slint")
-            .canonicalize()
-            .unwrap();
-    let theme = std::path::PathBuf::from("../../editor/src/crates/concat/ui/theme/theme.slint")
-        .canonicalize()
-        .unwrap();
+    let dialog_file = slint_import_path("../../editor/src/crates/concat/ui/dialogs/downloads.slint");
+    let theme = slint_import_path("../../editor/src/crates/concat/ui/theme/theme.slint");
     let text = format!(
-        "{font_import}import {{DownloadDialog,DownloadJobData}} from {:?};\nimport {{Theme}} from {:?};\nexport {{DownloadJobData,Theme}}\nexport component App inherits Window {{width:1120px;height:900px; callback start-compose(); callback start-open();\n{props}\n{dialog}\n}}",
-        dialog_file.to_string_lossy(),
-        theme.to_string_lossy()
+        "{font_import}import {{DownloadDialog,DownloadJobData}} from \"{dialog_file}\";\nimport {{Theme}} from \"{theme}\";\nexport {{DownloadJobData,Theme}}\nexport component App inherits Window {{width:1120px;height:900px; callback start-compose(); callback start-open();\n{props}\n{dialog}\n}}",
     );
     let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("bridge.slint");
     std::fs::write(&out, text).unwrap();
