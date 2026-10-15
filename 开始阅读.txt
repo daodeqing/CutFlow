@@ -1,0 +1,14 @@
+CutFlow 0.2.0 — Windows 原生视频剪辑与 B站素材采集
+
+这是源码工程，不是可直接双击的软件安装包。
+已包含 Concat 编辑器完整源码、BDL 完整参考源码，以及新增集成代码。
+
+1. 打开 README.md 查看 Windows 构建与使用方法。
+2. 不想在本机装开发工具，可将本目录完整放入自己的 GitHub 仓库，
+   在 Actions 中运行 Build CutFlow for Windows。
+3. Windows 构建成功后会生成 CutFlow.exe、便携 ZIP 和可选安装程序。
+4. 当前版本为 P0 集成实现，Windows 实机验收仍待执行。
+   测试范围和已知限制写在 docs/验收与已知限制.md。
+
+不要把 .exe 以外的 DLL 或 tools 文件夹删掉。
+不要将下载母版所在的 LocalAppData/CutFlow/jobs 目录当缓存清理。

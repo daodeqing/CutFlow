@@ -1,0 +1,112 @@
+[
+  {
+    "message": "fetch error: 读取分段响应失败: error decoding response body",
+    "summary": "下载响应读取失败",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "请求资源长度失败: HTTP 403 Forbidden",
+    "summary": "源站拒绝访问",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "HTTP 401 Unauthorized",
+    "summary": "登录状态失效",
+    "action": "login_then_retry"
+  },
+  {
+    "message": "[stage=refresh_urls code=login_required] HTTP 401，刷新前原始错误：[stage=download_video code=media_url_expired] HTTP 404",
+    "summary": "登录状态失效",
+    "action": "login_then_retry"
+  },
+  {
+    "message": "bpi error: API错误 [-101]: 账号未登录",
+    "summary": "登录状态失效",
+    "action": "login_then_retry"
+  },
+  {
+    "message": "Cookie 已失效",
+    "summary": "登录状态失效",
+    "action": "login_then_retry"
+  },
+  {
+    "message": "请求资源长度失败: HTTP 429 Too Many Requests",
+    "summary": "请求过于频繁",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "HTTP request failed with status 412",
+    "summary": "源站要求验证",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "API错误 [-352]: 风控校验失败",
+    "summary": "源站要求验证",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "该清晰度需要大会员权限",
+    "summary": "清晰度或付费内容权限不足",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "当前账号只能试看此分集，请登录已购买该课程的账号后重试。",
+    "summary": "清晰度或付费内容权限不足",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "稿件不可见或无权访问",
+    "summary": "资源不可访问",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "io error: Access is denied. (os error 5)",
+    "summary": "本地文件访问被拒绝",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "[stage=delete_file code=file_in_use] path=C:/downloads/401.mp4 os_error=32",
+    "summary": "文件被占用",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "文件为只读，未删除：C:/downloads/403.mp4",
+    "summary": "文件为只读",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "拒绝清理符号链接或目录联接：D:/downloads",
+    "summary": "文件路径未通过安全检查",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "输出磁盘或共享目录不可访问，尚未清理文件：Z:/",
+    "summary": "保存位置不可访问",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "任务仍在停止或导出，尚未清理任何文件。请稍后重试。",
+    "summary": "任务尚未停止",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "请求资源长度失败: request timed out",
+    "summary": "网络超时",
+    "action": "retry"
+  },
+  {
+    "message": "下载请求失败: HTTP 404 Not Found",
+    "summary": "链接可能已过期",
+    "action": "refresh_urls_and_retry"
+  },
+  {
+    "message": "任务 401403404 失败，文件 downloads/403.mp4 缺少数据",
+    "summary": "任务失败",
+    "action": "inspect_raw_log"
+  },
+  {
+    "message": "[stage=fetch_resource code=download_failed] connection reset\n各下载源最后错误：[stage=response_body code=response_body_failed] error decoding response body",
+    "summary": "所有下载地址均失败",
+    "action": "inspect_raw_log"
+  }
+]

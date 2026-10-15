@@ -1,0 +1,1192 @@
+use std::collections::HashSet;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+use chrono::Local;
+use serde::{Deserialize, Serialize};
+use url::Url;
+
+use crate::error::{BdlError, BdlResult};
+use crate::ids::PartId;
+use crate::model::{
+    AssetKind, DerivedAsset, MediaKind, MediaStream, NormalizedItem, NormalizedPart,
+    NormalizedSourceTree, SourceKind, StreamCodec, StreamQuality,
+};
+use crate::naming::{
+    DEFAULT_NAMING_TEMPLATE, DuplicateNamingStrategy, NamingContext, render_output_path,
+    resolve_duplicate_path,
+};
+use crate::queue::{
+    DownloadResource, DownloadResourceIntent, DownloadResourceKind, DownloadTask,
+    DownloadTaskMediaSelection, DownloadTaskRefreshInput, DownloadTaskRefreshIntent,
+    ResourceStatus, TaskStatus,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveMode {
+    Fast,
+    CompleteArchive,
+    Custom,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DownloadMediaMode {
+    #[default]
+    AudioVideo,
+    VideoOnly,
+    AudioOnly,
+    AssetsOnly,
+}
+
+impl DownloadMediaMode {
+    pub fn parse(value: &str) -> BdlResult<Self> {
+        match value {
+            "audio_video" => Ok(Self::AudioVideo),
+            "video_only" => Ok(Self::VideoOnly),
+            "audio_only" => Ok(Self::AudioOnly),
+            "assets_only" => Ok(Self::AssetsOnly),
+            other => Err(BdlError::Planning {
+                message: format!("下载内容设置无效：`{other}`。"),
+            }),
+        }
+    }
+
+    const fn includes_video(self) -> bool {
+        matches!(self, Self::AudioVideo | Self::VideoOnly)
+    }
+
+    const fn includes_audio(self) -> bool {
+        matches!(self, Self::AudioVideo | Self::AudioOnly)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ArchiveAssetSelection {
+    pub cover: bool,
+    pub subtitles: bool,
+    pub danmaku: bool,
+    pub nfo: bool,
+}
+
+impl ArchiveAssetSelection {
+    pub const fn all() -> Self {
+        Self {
+            cover: true,
+            subtitles: true,
+            danmaku: true,
+            nfo: true,
+        }
+    }
+
+    pub const fn none() -> Self {
+        Self {
+            cover: false,
+            subtitles: false,
+            danmaku: false,
+            nfo: false,
+        }
+    }
+
+    fn includes(self, intent: DownloadResourceIntent) -> bool {
+        match intent {
+            DownloadResourceIntent::Cover => self.cover,
+            DownloadResourceIntent::Subtitle => self.subtitles,
+            DownloadResourceIntent::Danmaku => self.danmaku,
+            DownloadResourceIntent::Nfo => self.nfo,
+            DownloadResourceIntent::Video | DownloadResourceIntent::Audio => false,
+        }
+    }
+}
+
+impl Default for ArchiveAssetSelection {
+    fn default() -> Self {
+        Self::all()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StreamPreference {
+    #[default]
+    Best,
+    Sdr,
+    Quality(u32),
+}
+
+impl StreamPreference {
+    pub fn parse_video(value: &str) -> BdlResult<Self> {
+        if value.trim().eq_ignore_ascii_case("sdr") {
+            return Ok(Self::Sdr);
+        }
+        Self::parse(value, "视频清晰度")
+    }
+
+    pub fn parse(value: &str, field_name: &str) -> BdlResult<Self> {
+        let trimmed = value.trim();
+        if trimmed.eq_ignore_ascii_case("best") {
+            return Ok(Self::Best);
+        }
+
+        let quality = trimmed.parse::<u32>().map_err(|_| BdlError::Planning {
+            message: format!("{field_name}设置无效：`{value}`。"),
+        })?;
+
+        if quality == 0 {
+            return Err(BdlError::Planning {
+                message: format!("{field_name}设置无效：清晰度必须大于 0。"),
+            });
+        }
+
+        Ok(Self::Quality(quality))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MissingQualityPolicy {
+    #[default]
+    Lower,
+    Skip,
+    Ask,
+}
+
+impl MissingQualityPolicy {
+    pub fn parse(value: &str) -> BdlResult<Self> {
+        match value {
+            "lower" => Ok(Self::Lower),
+            "skip" => Ok(Self::Skip),
+            "ask" => Ok(Self::Ask),
+            other => Err(BdlError::Planning {
+                message: format!("缺失清晰度策略无效：`{other}`。"),
+            }),
+        }
+    }
+}
+
+pub fn parse_stream_codec(value: &str) -> BdlResult<StreamCodec> {
+    match value {
+        "auto" => Ok(StreamCodec::Auto),
+        "avc" => Ok(StreamCodec::Avc),
+        "hevc" => Ok(StreamCodec::Hevc),
+        "av1" => Ok(StreamCodec::Av1),
+        other => Err(BdlError::Planning {
+            message: format!("视频编码设置无效：`{other}`。"),
+        }),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadOptions {
+    pub output_dir: PathBuf,
+    pub archive_mode: ArchiveMode,
+    pub media_mode: DownloadMediaMode,
+    pub output_extension: String,
+    pub naming_template: String,
+    pub duplicate_naming_strategy: DuplicateNamingStrategy,
+    pub video_quality: StreamPreference,
+    pub audio_quality: StreamPreference,
+    pub video_codec: StreamCodec,
+    pub media_preferences: crate::media_preferences::MediaPreferences,
+    pub missing_quality_policy: MissingQualityPolicy,
+    pub archive_assets: ArchiveAssetSelection,
+    pub processing: Option<crate::queue::TaskProcessingOptions>,
+    pub workflow: Option<crate::workflow::DownloadWorkflow>,
+}
+
+impl DownloadOptions {
+    pub fn new(output_dir: PathBuf) -> Self {
+        Self {
+            output_dir,
+            archive_mode: ArchiveMode::Fast,
+            media_mode: DownloadMediaMode::default(),
+            output_extension: "mp4".to_owned(),
+            naming_template: DEFAULT_NAMING_TEMPLATE.to_owned(),
+            duplicate_naming_strategy: DuplicateNamingStrategy::default(),
+            video_quality: StreamPreference::default(),
+            audio_quality: StreamPreference::default(),
+            video_codec: StreamCodec::Auto,
+            media_preferences: Default::default(),
+            missing_quality_policy: MissingQualityPolicy::default(),
+            archive_assets: ArchiveAssetSelection::all(),
+            processing: None,
+            workflow: None,
+        }
+    }
+
+    pub fn with_archive_mode(mut self, archive_mode: ArchiveMode) -> Self {
+        self.archive_mode = archive_mode;
+        self
+    }
+
+    pub fn selected_archive_assets(&self) -> ArchiveAssetSelection {
+        match self.archive_mode {
+            ArchiveMode::Fast => ArchiveAssetSelection::none(),
+            ArchiveMode::CompleteArchive => ArchiveAssetSelection::all(),
+            ArchiveMode::Custom => self.archive_assets,
+        }
+    }
+}
+
+/// Refresh only absent media required by the effective download recipe.
+pub fn missing_required_media_parts(
+    tree: &NormalizedSourceTree,
+    selected_part_ids: &[PartId],
+    options: &DownloadOptions,
+) -> Vec<PartId> {
+    selected_part_ids
+        .iter()
+        .filter(|id| {
+            find_part(tree, id).is_some_and(|selected| {
+                (options.media_mode.includes_video()
+                    && !selected
+                        .part
+                        .streams
+                        .iter()
+                        .any(|s| s.kind == MediaKind::Video))
+                    || (options.media_mode.includes_audio()
+                        && !selected
+                            .part
+                            .streams
+                            .iter()
+                            .any(|s| s.kind == MediaKind::Audio))
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+pub fn plan_selected_parts(
+    tree: &NormalizedSourceTree,
+    selected_part_ids: &[PartId],
+    options: &DownloadOptions,
+) -> BdlResult<Vec<DownloadTask>> {
+    let mut reserved_paths = HashSet::new();
+    let mut tasks = Vec::with_capacity(selected_part_ids.len());
+
+    for part_id in selected_part_ids {
+        let selected = find_part(tree, part_id).ok_or_else(|| BdlError::Planning {
+            message: format!(
+                "选中的分 P `{}` 未加载，请重新解析后再创建下载任务。",
+                part_id.0
+            ),
+        })?;
+        if let Some(task) = plan_part(tree, selected, options, &mut reserved_paths)? {
+            tasks.push(task);
+        }
+    }
+
+    Ok(tasks)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct DownloadSizeEstimate {
+    pub estimated_bytes: u64,
+    pub estimated_parts: usize,
+    pub unknown_streams: usize,
+}
+
+pub fn estimate_selected_parts_download_size(
+    tree: &NormalizedSourceTree,
+    selected_part_ids: &[PartId],
+    options: &DownloadOptions,
+) -> BdlResult<DownloadSizeEstimate> {
+    let mut estimated_bytes = 0_u128;
+    let mut unknown_streams = 0_usize;
+
+    for part_id in selected_part_ids {
+        let selected = find_part(tree, part_id).ok_or_else(|| BdlError::Planning {
+            message: format!(
+                "选中的分 P `{}` 未加载，请重新解析后再估算下载大小。",
+                part_id.0
+            ),
+        })?;
+        let duration = selected.part.duration_seconds;
+        if options.workflow.is_some() {
+            unknown_streams += complete_archive_resources(
+                "estimate",
+                Path::new("estimate.tmp"),
+                selected.item,
+                selected.part,
+                options.selected_archive_assets(),
+            )
+            .iter()
+            .filter(|resource| resource.intent != DownloadResourceIntent::Nfo)
+            .count();
+        }
+        if options.media_mode.includes_video() {
+            add_stream_size_estimate(
+                select_video_stream(selected.part, options)?,
+                duration,
+                &mut estimated_bytes,
+                &mut unknown_streams,
+            );
+        }
+        if options.media_mode.includes_audio() {
+            add_stream_size_estimate(
+                select_audio_stream(selected.part, options)?,
+                duration,
+                &mut estimated_bytes,
+                &mut unknown_streams,
+            );
+        }
+    }
+
+    Ok(DownloadSizeEstimate {
+        estimated_bytes: estimated_bytes.min(u128::from(u64::MAX)) as u64,
+        estimated_parts: selected_part_ids.len(),
+        unknown_streams,
+    })
+}
+
+fn add_stream_size_estimate(
+    stream: &MediaStream,
+    duration_seconds: Option<u64>,
+    estimated_bytes: &mut u128,
+    unknown_streams: &mut usize,
+) {
+    let (Some(bandwidth), Some(duration_seconds)) = (stream.bandwidth, duration_seconds) else {
+        *unknown_streams += 1;
+        return;
+    };
+    let bits = u128::from(bandwidth).saturating_mul(u128::from(duration_seconds));
+    *estimated_bytes = estimated_bytes.saturating_add(bits.div_ceil(8));
+}
+
+struct SelectedPart<'a> {
+    item: &'a NormalizedItem,
+    part: &'a NormalizedPart,
+    item_index: usize,
+    part_index: usize,
+}
+
+fn find_part<'a>(tree: &'a NormalizedSourceTree, part_id: &PartId) -> Option<SelectedPart<'a>> {
+    tree.groups
+        .iter()
+        .flat_map(|group| &group.items)
+        .enumerate()
+        .find_map(|(item_index, item)| {
+            item.parts
+                .iter()
+                .enumerate()
+                .find(|(_, part)| &part.id == part_id)
+                .map(|(part_index, part)| SelectedPart {
+                    item,
+                    part,
+                    item_index,
+                    part_index,
+                })
+        })
+}
+
+fn plan_part(
+    tree: &NormalizedSourceTree,
+    selected: SelectedPart<'_>,
+    options: &DownloadOptions,
+    reserved_paths: &mut HashSet<PathBuf>,
+) -> BdlResult<Option<DownloadTask>> {
+    let item = selected.item;
+    let part = selected.part;
+    let mut task_id = format!("task:{}:{}", tree.source.id.0, part.id.0);
+    if let Some(workflow) = &options.workflow {
+        workflow.validate()?;
+        task_id.push_str(&format!(":workflow:{}", workflow.fingerprint()));
+    }
+    let title = task_title(item, part);
+    let video = if options.media_mode.includes_video() {
+        Some(select_video_stream(part, options)?)
+    } else {
+        None
+    };
+    let audio = if options.media_mode.includes_audio() {
+        Some(select_audio_stream(part, options)?)
+    } else {
+        None
+    };
+    let mut effective_options = options.clone();
+    if let Some(workflow) = &options.workflow {
+        effective_options.output_extension = workflow_output_extension(workflow, item, part)?;
+    }
+    let Some(output_path) = output_path_for(
+        tree,
+        &selected,
+        video,
+        audio,
+        &effective_options,
+        reserved_paths,
+    )?
+    else {
+        return Ok(None);
+    };
+
+    let mut resources = Vec::with_capacity(2);
+    if let Some(video) = video {
+        resources.push(media_resource(
+            &task_id,
+            &output_path,
+            DownloadResourceIntent::Video,
+            DownloadResourceKind::Video,
+            video,
+        )?);
+    }
+    if let Some(audio) = audio {
+        resources.push(media_resource(
+            &task_id,
+            &output_path,
+            DownloadResourceIntent::Audio,
+            DownloadResourceKind::Audio,
+            audio,
+        )?);
+    }
+
+    let mut archive_assets = options.selected_archive_assets();
+    if let Some(processing) = options.processing {
+        archive_assets.cover |= processing.embed_cover;
+        archive_assets.subtitles |= processing.embed_subtitles;
+    }
+    if archive_assets != ArchiveAssetSelection::none() {
+        resources.extend(complete_archive_resources(
+            &task_id,
+            &output_path,
+            item,
+            part,
+            archive_assets,
+        ));
+    }
+
+    let artifacts = options
+        .workflow
+        .as_ref()
+        .map(|workflow| workflow_artifacts(workflow, &resources, &output_path))
+        .unwrap_or_default();
+    let task = DownloadTask {
+        id: task_id,
+        title,
+        source_id: tree.source.id.0.clone(),
+        status: TaskStatus::Waiting,
+        resources,
+        output_path,
+        export_target: None,
+        refresh_intent: media_refresh_intent(tree.source.kind, part, selected.part_index + 1).map(
+            |mut intent| {
+                intent.cover_url.clone_from(&item.cover_url);
+                intent.duration_seconds = part.duration_seconds.or(item.duration_seconds);
+                intent
+            },
+        ),
+        media_selection: DownloadTaskMediaSelection {
+            owned_document_uris: Vec::new(),
+            preserved_document_uris: Vec::new(),
+            outputs_verified: false,
+            workflow: options.workflow.clone(),
+            artifacts,
+            processing: options.processing,
+            video_quality: video
+                .map(stream_quality_label)
+                .unwrap_or_else(|| "none".to_owned()),
+            audio_quality: audio
+                .map(stream_quality_label)
+                .unwrap_or_else(|| "none".to_owned()),
+            video_codec: video.map(stream_codec_label).unwrap_or("none").to_owned(),
+            container: effective_options.output_extension.clone(),
+        },
+        scheduled_at: None,
+        speed_limit_bytes_per_second: None,
+    };
+    if options.workflow.is_some() {
+        reserved_paths.remove(&task.output_path);
+        return crate::workflow::reserve_task_paths(
+            task,
+            reserved_paths,
+            options.duplicate_naming_strategy,
+        );
+    }
+    Ok(Some(task))
+}
+
+fn workflow_output_extension(
+    workflow: &crate::workflow::DownloadWorkflow,
+    item: &NormalizedItem,
+    part: &NormalizedPart,
+) -> BdlResult<String> {
+    if workflow.has_media_output() {
+        return Ok(workflow.container.clone());
+    }
+    if workflow.video.enabled && (workflow.video.save || workflow.video.retain_original) {
+        return Ok("m4s".into());
+    }
+    if workflow.audio.enabled && (workflow.audio.save || workflow.audio.retain_original) {
+        return Ok(if workflow.audio.save {
+            workflow.audio.format.clone()
+        } else {
+            "m4s".into()
+        });
+    }
+    for (intent, rule) in [
+        (DownloadResourceIntent::Cover, &workflow.cover),
+        (DownloadResourceIntent::Subtitle, &workflow.subtitles),
+        (DownloadResourceIntent::Danmaku, &workflow.danmaku),
+    ] {
+        if !rule.enabled
+            || (!rule.save && !rule.retain_original)
+            || !asset_is_available(item, part, intent)
+        {
+            continue;
+        }
+        let source = asset_resource("extension", Path::new("output.tmp"), item, part, intent);
+        return Ok(if rule.save && rule.format != "original" {
+            rule.format.clone()
+        } else {
+            source
+                .target_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("bin")
+                .into()
+        });
+    }
+    if workflow.nfo {
+        return Ok("nfo".into());
+    }
+    Err(BdlError::Planning {
+        message: if workflow.subtitles.enabled {
+            "没有可下载的字幕。"
+        } else {
+            "来源没有所选的可下载内容。"
+        }
+        .into(),
+    })
+}
+
+fn workflow_artifacts(
+    workflow: &crate::workflow::DownloadWorkflow,
+    resources: &[DownloadResource],
+    output: &Path,
+) -> Vec<crate::workflow::DownloadArtifact> {
+    use crate::workflow::DownloadArtifact;
+    let mut artifacts = Vec::new();
+    if workflow.has_media_output() {
+        artifacts.push(DownloadArtifact {
+            path: output.into(),
+            intent: None,
+            resource_id: None,
+            original: false,
+            document_uri: None,
+        });
+    }
+    for resource in resources {
+        let (save, retain, format) = match resource.intent {
+            DownloadResourceIntent::Video => {
+                (workflow.video.save, workflow.video.retain_original, "m4s")
+            }
+            DownloadResourceIntent::Audio => (
+                workflow.audio.save,
+                workflow.audio.retain_original,
+                workflow.audio.format.as_str(),
+            ),
+            DownloadResourceIntent::Cover => (
+                workflow.cover.save,
+                workflow.cover.retain_original,
+                workflow.cover.format.as_str(),
+            ),
+            DownloadResourceIntent::Subtitle => (
+                workflow.subtitles.save,
+                workflow.subtitles.retain_original,
+                workflow.subtitles.format.as_str(),
+            ),
+            DownloadResourceIntent::Danmaku => (
+                workflow.danmaku.save,
+                workflow.danmaku.retain_original,
+                workflow.danmaku.format.as_str(),
+            ),
+            DownloadResourceIntent::Nfo => (true, false, "original"),
+        };
+        if save {
+            let mut path = if format == "original" {
+                resource.target_path.clone()
+            } else {
+                resource.target_path.with_extension(format)
+            };
+            if artifacts.is_empty() {
+                path = output.into();
+            }
+            artifacts.push(DownloadArtifact {
+                path,
+                intent: Some(resource.intent),
+                resource_id: Some(resource.id.clone()),
+                original: format == "original" || format == "m4s" || format == "xml",
+                document_uri: None,
+            });
+        }
+        if retain
+            && !artifacts
+                .iter()
+                .any(|a| a.resource_id.as_ref() == Some(&resource.id) && a.original)
+        {
+            let path = if artifacts.is_empty() {
+                output.into()
+            } else {
+                resource.target_path.clone()
+            };
+            artifacts.push(DownloadArtifact {
+                path,
+                intent: Some(resource.intent),
+                resource_id: Some(resource.id.clone()),
+                original: true,
+                document_uri: None,
+            });
+        }
+    }
+    artifacts
+}
+
+fn select_video_stream<'a>(
+    part: &'a NormalizedPart,
+    options: &DownloadOptions,
+) -> BdlResult<&'a MediaStream> {
+    let streams = streams_by_kind(part, MediaKind::Video)
+        .into_iter()
+        .filter(|stream| {
+            options.video_quality != StreamPreference::Sdr
+                || crate::media_preferences::is_sdr(stream.quality)
+        })
+        .collect::<Vec<_>>();
+    if !options.media_preferences.video.is_empty() {
+        options.media_preferences.validate()?;
+        for rule in &options.media_preferences.video {
+            if let Some(stream) = streams
+                .iter()
+                .copied()
+                .filter(|stream| rule.matches(stream))
+                .max_by_key(|stream| stream_selection_rank(stream))
+            {
+                return Ok(stream);
+            }
+        }
+        return preference_fallback(streams, options, "视频", &part.title);
+    }
+    let codec_matches = if options.video_codec == StreamCodec::Auto {
+        Vec::new()
+    } else {
+        streams
+            .iter()
+            .copied()
+            .filter(|stream| stream.codec == options.video_codec)
+            .collect::<Vec<_>>()
+    };
+    let candidates = if codec_matches.is_empty() {
+        streams
+    } else {
+        codec_matches
+    };
+
+    select_stream_by_quality(
+        candidates,
+        options.video_quality,
+        options.missing_quality_policy,
+        "视频",
+        &part.title,
+    )
+}
+
+fn select_audio_stream<'a>(
+    part: &'a NormalizedPart,
+    options: &DownloadOptions,
+) -> BdlResult<&'a MediaStream> {
+    if !options.media_preferences.audio.is_empty() {
+        options.media_preferences.validate()?;
+        let streams = streams_by_kind(part, MediaKind::Audio);
+        for quality in &options.media_preferences.audio {
+            if let Some(stream) = streams
+                .iter()
+                .copied()
+                .filter(|stream| {
+                    quality == "best"
+                        || quality
+                            .parse::<u32>()
+                            .is_ok_and(|quality| stream.quality == StreamQuality::Quality(quality))
+                })
+                .max_by_key(|stream| stream_selection_rank(stream))
+            {
+                return Ok(stream);
+            }
+        }
+        return preference_fallback(streams, options, "音频", &part.title);
+    }
+    select_stream_by_quality(
+        streams_by_kind(part, MediaKind::Audio),
+        options.audio_quality,
+        options.missing_quality_policy,
+        "音频",
+        &part.title,
+    )
+}
+
+fn streams_by_kind(part: &NormalizedPart, kind: MediaKind) -> Vec<&MediaStream> {
+    part.streams
+        .iter()
+        .filter(|stream| stream.kind == kind)
+        .collect()
+}
+
+fn preference_fallback<'a>(
+    streams: Vec<&'a MediaStream>,
+    options: &DownloadOptions,
+    label: &str,
+    title: &str,
+) -> BdlResult<&'a MediaStream> {
+    if options.media_preferences.fallback == crate::media_preferences::PreferenceFallback::Best {
+        return select_stream_by_quality(
+            streams,
+            StreamPreference::Best,
+            MissingQualityPolicy::Lower,
+            label,
+            title,
+        );
+    }
+    Err(BdlError::Planning {
+        message: format!(
+            "`{title}` 没有符合{label}偏好的可用轨道，请调整偏好顺序或允许回退到最佳可用。"
+        ),
+    })
+}
+
+fn select_stream_by_quality<'a>(
+    streams: Vec<&'a MediaStream>,
+    preference: StreamPreference,
+    missing_policy: MissingQualityPolicy,
+    stream_label: &str,
+    part_title: &str,
+) -> BdlResult<&'a MediaStream> {
+    if streams.is_empty() {
+        return Err(BdlError::Planning {
+            message: if preference == StreamPreference::Sdr {
+                format!("`{part_title}` 没有可用的 SDR 视频轨道，请选择其他画质后重试。")
+            } else {
+                format!("`{part_title}` 缺少{stream_label}流，请重新解析后再试。")
+            },
+        });
+    }
+
+    match preference {
+        StreamPreference::Sdr => streams
+            .into_iter()
+            .filter(|stream| {
+                stream.kind == MediaKind::Video && crate::media_preferences::is_sdr(stream.quality)
+            })
+            .max_by_key(|stream| stream_selection_rank(stream))
+            .ok_or_else(|| BdlError::Planning {
+                message: format!("`{part_title}` 没有可用的 SDR 视频轨道，请选择其他画质后重试。"),
+            }),
+        StreamPreference::Best => streams
+            .into_iter()
+            .max_by_key(|stream| stream_selection_rank(stream))
+            .ok_or_else(|| BdlError::Planning {
+                message: format!("`{part_title}` 缺少{stream_label}流，请重新解析后再试。"),
+            }),
+        StreamPreference::Quality(target) => {
+            select_target_quality(streams, target, missing_policy, stream_label, part_title)
+        }
+    }
+}
+
+fn select_target_quality<'a>(
+    streams: Vec<&'a MediaStream>,
+    target: u32,
+    missing_policy: MissingQualityPolicy,
+    stream_label: &str,
+    part_title: &str,
+) -> BdlResult<&'a MediaStream> {
+    if let Some(exact) = streams
+        .iter()
+        .copied()
+        .filter(|stream| stream_quality_rank(stream.quality) == target)
+        .max_by_key(|stream| stream_selection_rank(stream))
+    {
+        return Ok(exact);
+    }
+
+    if missing_policy == MissingQualityPolicy::Lower {
+        let lower_or_equal = streams
+            .iter()
+            .copied()
+            .filter(|stream| {
+                media_quality_rank(stream.kind, stream.quality)
+                    <= media_quality_rank(stream.kind, StreamQuality::Quality(target))
+            })
+            .max_by_key(|stream| stream_selection_rank(stream));
+
+        return lower_or_equal
+            .or_else(|| {
+                streams
+                    .iter()
+                    .copied()
+                    .min_by_key(|stream| stream_selection_rank(stream))
+            })
+            .ok_or_else(|| BdlError::Planning {
+                message: format!("`{part_title}` 缺少{stream_label}流，请重新解析后再试。"),
+            });
+    }
+
+    let action = match missing_policy {
+        MissingQualityPolicy::Skip => "已按设置跳过创建任务",
+        MissingQualityPolicy::Ask => "需要用户确认后再创建任务",
+        MissingQualityPolicy::Lower => unreachable!("lower policy handled above"),
+    };
+
+    Err(BdlError::Planning {
+        message: format!("`{part_title}` 没有 {target} 的{stream_label}流，{action}。"),
+    })
+}
+
+fn media_resource(
+    task_id: &str,
+    output_path: &Path,
+    intent: DownloadResourceIntent,
+    kind: DownloadResourceKind,
+    stream: &MediaStream,
+) -> BdlResult<DownloadResource> {
+    if stream.urls.is_empty() {
+        return Err(BdlError::Planning {
+            message: format!("`{}` 没有可用下载地址，请重新解析后再试。", stream.id),
+        });
+    }
+
+    let suffix = resource_suffix(intent);
+    let target_path = sibling_resource_path(output_path, suffix, Some("m4s"));
+    Ok(DownloadResource {
+        id: format!("{task_id}:resource:{suffix}"),
+        kind,
+        intent,
+        current_urls: stream.urls.clone(),
+        headers: stream.headers.clone(),
+        temp_path: temp_path_for(&target_path),
+        target_path,
+        status: ResourceStatus::Pending,
+    })
+}
+
+fn media_refresh_intent(
+    source_kind: SourceKind,
+    part: &NormalizedPart,
+    page_number: usize,
+) -> Option<DownloadTaskRefreshIntent> {
+    match source_kind {
+        SourceKind::Bangumi => episode_refresh_intent(part, "bangumi")
+            .or_else(|| video_refresh_intent(part, page_number)),
+        SourceKind::Cheese => episode_refresh_intent(part, "cheese")
+            .or_else(|| video_refresh_intent(part, page_number)),
+        SourceKind::Video
+        | SourceKind::Favorite
+        | SourceKind::Collection
+        | SourceKind::Series
+        | SourceKind::Uploader
+        | SourceKind::Unknown => video_refresh_intent(part, page_number)
+            .or_else(|| episode_refresh_intent(part, "bangumi"))
+            .or_else(|| episode_refresh_intent(part, "cheese")),
+    }
+}
+
+fn video_refresh_intent(
+    part: &NormalizedPart,
+    page_number: usize,
+) -> Option<DownloadTaskRefreshIntent> {
+    let cid = part.cid?;
+    let input = if let Some(bvid) = part.bvid.as_ref().filter(|value| !value.is_empty()) {
+        DownloadTaskRefreshInput::VideoBvid { bvid: bvid.clone() }
+    } else {
+        DownloadTaskRefreshInput::VideoAid { aid: part.aid? }
+    };
+
+    Some(DownloadTaskRefreshIntent {
+        input,
+        cid,
+        page_number: u32::try_from(page_number).ok(),
+        cover_url: None,
+        duration_seconds: None,
+    })
+}
+
+fn episode_refresh_intent(part: &NormalizedPart, kind: &str) -> Option<DownloadTaskRefreshIntent> {
+    let cid = part.cid?;
+    let part_key = part.id.0.strip_prefix("part:")?;
+    let mut segments = part_key.split(':');
+    if segments.next()? != kind {
+        return None;
+    }
+
+    let _season_id = parse_positive_u64(segments.next()?)?;
+    let ep_id = parse_positive_u64(segments.next()?)?;
+    let input = match kind {
+        "bangumi" => DownloadTaskRefreshInput::BangumiEpisode { ep_id },
+        "cheese" => DownloadTaskRefreshInput::CheeseEpisode { ep_id },
+        _ => return None,
+    };
+
+    Some(DownloadTaskRefreshIntent {
+        input,
+        cid,
+        page_number: None,
+        cover_url: None,
+        duration_seconds: None,
+    })
+}
+
+fn complete_archive_resources(
+    task_id: &str,
+    output_path: &Path,
+    item: &NormalizedItem,
+    part: &NormalizedPart,
+    selection: ArchiveAssetSelection,
+) -> Vec<DownloadResource> {
+    [
+        DownloadResourceIntent::Cover,
+        DownloadResourceIntent::Subtitle,
+        DownloadResourceIntent::Danmaku,
+        DownloadResourceIntent::Nfo,
+    ]
+    .into_iter()
+    .filter(|intent| selection.includes(*intent) && asset_is_available(item, part, *intent))
+    .map(|intent| asset_resource(task_id, output_path, item, part, intent))
+    .collect()
+}
+
+fn asset_is_available(
+    item: &NormalizedItem,
+    part: &NormalizedPart,
+    intent: DownloadResourceIntent,
+) -> bool {
+    match intent {
+        DownloadResourceIntent::Cover => {
+            part_asset(part, intent).is_some_and(|asset| !asset.urls.is_empty())
+                || item
+                    .cover_url
+                    .as_ref()
+                    .is_some_and(|url| !url.trim().is_empty())
+        }
+        DownloadResourceIntent::Subtitle | DownloadResourceIntent::Danmaku => {
+            part_asset(part, intent).is_some_and(|asset| !asset.urls.is_empty())
+        }
+        DownloadResourceIntent::Nfo => true,
+        DownloadResourceIntent::Video | DownloadResourceIntent::Audio => false,
+    }
+}
+
+fn asset_resource(
+    task_id: &str,
+    output_path: &Path,
+    item: &NormalizedItem,
+    part: &NormalizedPart,
+    intent: DownloadResourceIntent,
+) -> DownloadResource {
+    let suffix = resource_suffix(intent);
+    let asset = part_asset(part, intent);
+    let current_urls = asset_urls(item, asset, intent);
+    let inferred_format = asset
+        .and_then(|asset| asset.format.clone())
+        .or_else(|| infer_asset_extension(intent, &current_urls));
+    let target_path = sibling_resource_path(output_path, suffix, inferred_format.as_deref());
+    DownloadResource {
+        id: format!("{task_id}:resource:{suffix}"),
+        kind: DownloadResourceKind::Asset,
+        intent,
+        current_urls,
+        headers: asset.map(|asset| asset.headers.clone()).unwrap_or_default(),
+        temp_path: temp_path_for(&target_path),
+        target_path,
+        status: ResourceStatus::Pending,
+    }
+}
+
+fn infer_asset_extension(intent: DownloadResourceIntent, urls: &[String]) -> Option<String> {
+    if intent != DownloadResourceIntent::Cover {
+        return None;
+    }
+
+    urls.iter().find_map(|value| {
+        let url = Url::parse(value).ok()?;
+        let extension = Path::new(url.path())
+            .extension()?
+            .to_str()?
+            .to_ascii_lowercase();
+        matches!(
+            extension.as_str(),
+            "jpg" | "jpeg" | "png" | "webp" | "avif" | "gif"
+        )
+        .then_some(extension)
+    })
+}
+
+fn output_path_for(
+    tree: &NormalizedSourceTree,
+    selected: &SelectedPart<'_>,
+    video: Option<&MediaStream>,
+    audio: Option<&MediaStream>,
+    options: &DownloadOptions,
+    reserved_paths: &mut HashSet<PathBuf>,
+) -> BdlResult<Option<PathBuf>> {
+    let item = selected.item;
+    let part = selected.part;
+    let today = Local::now().date_naive().to_string();
+    let representative_stream = video.or(audio);
+    if representative_stream.is_none() && options.workflow.is_none() {
+        return Err(BdlError::Planning {
+            message: format!("`{}` 没有可下载的媒体流。", part.title),
+        });
+    }
+    let quality_label = representative_stream
+        .map(stream_quality_label)
+        .unwrap_or_else(|| "none".into());
+    let codec_label = video.map(stream_codec_label).unwrap_or("none");
+    let context = NamingContext {
+        title: &item.title,
+        part_title: &part.title,
+        part_index: selected.part_index + 1,
+        bvid: part.bvid.as_deref(),
+        aid: part.aid,
+        cid: part.cid,
+        owner_name: item.owner_name.as_deref(),
+        owner_mid: item.owner_mid,
+        series_title: Some(&tree.source.title),
+        season_index: None,
+        episode_index: Some(selected.item_index + 1),
+        collection_title: Some(&tree.source.title),
+        index: Some(selected.item_index + 1),
+        quality: Some(&quality_label),
+        codec: Some(codec_label),
+        date: Some(&today),
+        publish_date: item.publish_date.as_deref(),
+        ext: &options.output_extension,
+    };
+    let relative_path = render_output_path(&options.naming_template, &context)?;
+
+    Ok(resolve_duplicate_path(
+        options.output_dir.join(relative_path),
+        reserved_paths,
+        options.duplicate_naming_strategy,
+    ))
+}
+
+fn sibling_resource_path(output_path: &Path, suffix: &str, extension: Option<&str>) -> PathBuf {
+    let stem = output_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("untitled");
+    let file_name = match extension {
+        Some(extension) => format!("{stem}.{suffix}.{extension}"),
+        None => format!("{stem}.{suffix}"),
+    };
+
+    output_path.with_file_name(file_name)
+}
+
+fn part_asset(part: &NormalizedPart, intent: DownloadResourceIntent) -> Option<&DerivedAsset> {
+    let kind = match intent {
+        DownloadResourceIntent::Cover => AssetKind::Cover,
+        DownloadResourceIntent::Subtitle => AssetKind::Subtitle,
+        DownloadResourceIntent::Danmaku => AssetKind::Danmaku,
+        DownloadResourceIntent::Nfo => AssetKind::Nfo,
+        DownloadResourceIntent::Video | DownloadResourceIntent::Audio => return None,
+    };
+
+    part.assets.iter().find(|asset| asset.kind == kind)
+}
+
+fn asset_urls(
+    item: &NormalizedItem,
+    asset: Option<&DerivedAsset>,
+    intent: DownloadResourceIntent,
+) -> Vec<String> {
+    match intent {
+        DownloadResourceIntent::Cover => asset
+            .map(|asset| asset.urls.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .chain(item.cover_url.iter().cloned())
+            .collect(),
+        DownloadResourceIntent::Subtitle | DownloadResourceIntent::Danmaku => {
+            asset.map(|asset| asset.urls.clone()).unwrap_or_default()
+        }
+        DownloadResourceIntent::Video
+        | DownloadResourceIntent::Audio
+        | DownloadResourceIntent::Nfo => Vec::new(),
+    }
+}
+
+fn temp_path_for(target_path: &Path) -> PathBuf {
+    let mut value = OsString::from(target_path.as_os_str());
+    value.push(".bdlpart");
+    PathBuf::from(value)
+}
+
+fn task_title(item: &NormalizedItem, part: &NormalizedPart) -> String {
+    if part.title.trim().is_empty() || part.title == item.title {
+        item.title.clone()
+    } else {
+        format!("{} - {}", item.title, part.title)
+    }
+}
+
+fn resource_suffix(intent: DownloadResourceIntent) -> &'static str {
+    match intent {
+        DownloadResourceIntent::Video => "video",
+        DownloadResourceIntent::Audio => "audio",
+        DownloadResourceIntent::Cover => "cover",
+        DownloadResourceIntent::Subtitle => "subtitle",
+        DownloadResourceIntent::Danmaku => "danmaku",
+        DownloadResourceIntent::Nfo => "nfo",
+    }
+}
+
+fn stream_selection_rank(stream: &MediaStream) -> (u32, u64) {
+    (
+        media_quality_rank(stream.kind, stream.quality),
+        stream.bandwidth.unwrap_or_default(),
+    )
+}
+
+fn media_quality_rank(kind: MediaKind, quality: StreamQuality) -> u32 {
+    if kind == MediaKind::Audio {
+        // Platform IDs are identifiers, not fidelity scores. Explicit audio rules can
+        // override this default preference for lossless, Dolby, then ordinary AAC.
+        return match quality {
+            StreamQuality::Best => u32::MAX,
+            StreamQuality::Quality(30251) => 6,
+            StreamQuality::Quality(30250) => 5,
+            StreamQuality::Quality(30255) => 4,
+            StreamQuality::Quality(30280) => 3,
+            StreamQuality::Quality(30232) => 2,
+            StreamQuality::Quality(30216) => 1,
+            StreamQuality::Quality(_) => 0,
+        };
+    }
+    stream_quality_rank(quality)
+}
+
+fn stream_quality_rank(quality: StreamQuality) -> u32 {
+    match quality {
+        crate::model::StreamQuality::Best => u32::MAX,
+        crate::model::StreamQuality::Quality(value) => value,
+    }
+}
+
+fn parse_positive_u64(value: &str) -> Option<u64> {
+    value.parse::<u64>().ok().filter(|value| *value > 0)
+}
+
+fn stream_quality_label(stream: &MediaStream) -> String {
+    match stream.quality {
+        crate::model::StreamQuality::Best => "best".to_owned(),
+        crate::model::StreamQuality::Quality(value) => value.to_string(),
+    }
+}
+
+fn stream_codec_label(stream: &MediaStream) -> &'static str {
+    match stream.codec {
+        crate::model::StreamCodec::Auto => "auto",
+        crate::model::StreamCodec::Avc => "avc",
+        crate::model::StreamCodec::Hevc => "hevc",
+        crate::model::StreamCodec::Av1 => "av1",
+        crate::model::StreamCodec::Unknown => "unknown",
+    }
+}

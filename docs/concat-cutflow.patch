@@ -1,0 +1,1903 @@
+--- a/src/Cargo.lock
++++ b/src/Cargo.lock
+@@ -1143,6 +1143,7 @@
+  "concat-speech",
+  "concat-text",
+  "concat-vision",
++ "cutflow-download",
+  "dirs",
+  "image",
+  "libc",
+@@ -1604,6 +1605,14 @@
+ version = "1.2.0"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
++
++[[package]]
++name = "cutflow-download"
++version = "0.1.0"
++dependencies = [
++ "serde",
++ "serde_json",
++]
+ 
+ [[package]]
+ name = "daachorse"
+--- a/src/crates/concat/Cargo.toml
++++ b/src/crates/concat/Cargo.toml
+@@ -113,6 +113,7 @@
+ ] }
+ 
+ [dependencies]
++cutflow-download = { path = "../../../../downloader" }
+ # The log facade. The window writes `log::warn!`; where that ends up is
+ # concat-host's logs.rs, opened by whichever entry point started this run.
+ log = "0.4"
+--- a/src/crates/concat/build.rs
++++ b/src/crates/concat/build.rs
+@@ -72,15 +72,15 @@
+     // and without one they show Windows' generic program icon. Needs the
+     // Windows SDK's rc.exe, which an MSVC toolchain has.
+     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+-        let icon = "../../../assets/icons/concat.ico";
++        let icon = "../../../assets/icons/cutflow.ico";
+         println!("cargo:rerun-if-changed={icon}");
+         // The file's name and description as Windows shows them in its
+         // properties, and as code signing checks them: "Concat" in every
+         // build, where the default would be the crate's lower-case name.
+         winresource::WindowsResource::new()
+             .set_icon(icon)
+-            .set("ProductName", "Concat")
+-            .set("FileDescription", "Concat")
++            .set("ProductName", "CutFlow")
++            .set("FileDescription", "CutFlow")
+             .set(
+                 "LegalCopyright",
+                 "Copyright 2026 Jareer and Concat contributors, AGPL-3.0-or-later",
+--- a/src/crates/concat/src/downloads.rs
++++ b/src/crates/concat/src/downloads.rs
+@@ -0,0 +1,1162 @@
++// SPDX-License-Identifier: AGPL-3.0-or-later
++//! Native task UI. The event-loop thread owns the queue; workers own I/O.
++use crate::{
++    host::Shell,
++    ui::{App, DownloadJobData},
++};
++use concat_host::media::{self, MediaSummary};
++use concat_project::Command;
++use cutflow_download::{
++    Asset, Engine, Queue, Status,
++    actions::{self, Action},
++};
++use slint::{ComponentHandle, ModelRc, VecModel};
++use std::{
++    cell::RefCell,
++    path::{Path, PathBuf},
++    rc::Rc,
++    sync::{
++        Arc,
++        atomic::{AtomicBool, Ordering},
++        mpsc,
++    },
++    thread,
++    time::Instant,
++};
++
++#[derive(Clone, PartialEq)]
++enum Work {
++    Parse,
++    Download(String),
++    Import(String),
++    Check,
++}
++impl Work {
++    fn id(&self) -> Option<&str> {
++        match self {
++            Self::Download(id) | Self::Import(id) => Some(id),
++            _ => None,
++        }
++    }
++}
++enum Done {
++    Parsed(cutflow_download::Result<String>),
++    Downloaded(String, cutflow_download::Result<Vec<Asset>>),
++    Probed(String, Vec<cutflow_download::Result<MediaSummary>>),
++    Checked(cutflow_download::Result<String>),
++    Crashed,
++}
++struct Active {
++    kind: Work,
++    cancel: Arc<AtomicBool>,
++    worker: thread::JoinHandle<()>,
++    started: Instant,
++}
++#[derive(Default)]
++struct Form {
++    input: String,
++    parts: String,
++    quality: i32,
++    rights: String,
++}
++struct State {
++    queue: Queue,
++    engine: Engine,
++    tx: mpsc::Sender<Done>,
++    rx: mpsc::Receiver<Done>,
++    active: Option<Active>,
++    autorun: bool,
++    fault: Option<String>,
++    message: String,
++    tone: i32,
++    tools: String,
++    tools_ready: bool,
++    filter: i32,
++    query: String,
++    form: Form,
++    current: Option<PathBuf>,
++    rows: Rc<VecModel<DownloadJobData>>,
++    dirty: bool,
++    _lock: Option<std::fs::File>,
++}
++fn same_path(a: &Path, b: &Path) -> bool {
++    a.canonicalize()
++        .ok()
++        .zip(b.canonicalize().ok())
++        .is_some_and(|(a, b)| a == b)
++}
++fn project_path() -> Option<PathBuf> {
++    let mut path = None;
++    Shell::with(|shell, _| {
++        path = shell
++            .studio
++            .borrow()
++            .session
++            .as_ref()
++            .map(|s| PathBuf::from(s.path()))
++    });
++    path
++}
++fn open_folder(path: &Path) -> cutflow_download::Result<()> {
++    if !path.is_dir() {
++        return Err("目录尚未创建，完成一次下载后再打开。".into());
++    }
++    #[cfg(not(any(target_os = "android", target_os = "ios")))]
++    {
++        opener::open(path).map_err(|_| "无法打开文件夹，请检查目录是否仍存在。".into())
++    }
++    #[cfg(any(target_os = "android", target_os = "ios"))]
++    {
++        Err("文件夹入口仅用于桌面版".into())
++    }
++}
++fn save_current() -> cutflow_download::Result<()> {
++    let mut result = Ok(());
++    Shell::with(|shell, _| {
++        let mut studio = shell.studio.borrow_mut();
++        studio.flush_commit();
++        if let Some(session) = studio.session.as_mut() {
++            result = session.save(None);
++        }
++    });
++    result
++}
++impl State {
++    fn tell(&mut self, text: impl Into<String>, tone: i32) {
++        self.message = text.into();
++        self.tone = tone;
++        self.dirty = true;
++    }
++    fn writable(&mut self) -> bool {
++        if let Some(e) = self.fault.clone() {
++            self.tell(e, 2);
++            false
++        } else {
++            true
++        }
++    }
++    fn network_ready(&mut self) -> bool {
++        if !self.writable() {
++            return false;
++        }
++        if !self.tools_ready {
++            self.tell("下载组件未就绪，请点击检查组件或打开组件目录。", 2);
++            return false;
++        }
++        true
++    }
++    fn persist(&mut self) -> bool {
++        if self.fault.is_some() {
++            return false;
++        }
++        if let Err(e) = self.queue.save(&self.engine.data) {
++            self.fault = Some(format!("任务保存失败，暂停新操作：{e}"));
++            self.autorun = false;
++            if let Some(active) = &self.active {
++                active.cancel.store(true, Ordering::SeqCst);
++            }
++            self.dirty = true;
++            return false;
++        }
++        self.dirty = true;
++        true
++    }
++    fn form_error(&self) -> String {
++        if !(0..=2).contains(&self.form.quality) {
++            return "请选择支持的画质。".into();
++        }
++
++        if self.fault.is_some() {
++            return "任务存储不可写，请先处理下方错误。".into();
++        }
++        if self.current.is_none() {
++            return "先新建或打开一个剪辑工程。".into();
++        }
++        if !self.tools_ready {
++            return "先准备 bdl、ffmpeg 和 ffprobe 组件。".into();
++        }
++        if self.form.input.trim().is_empty() {
++            return "粘贴视频链接，再填写分 P 和用途备注。".into();
++        }
++        if let Err(e) = cutflow_download::validate_input(&self.form.input) {
++            return e;
++        }
++        if let Err(e) = cutflow_download::validate_parts(&self.form.parts) {
++            return e;
++        }
++        if self.form.rights.trim().is_empty() {
++            return "请填写素材用途或授权备注。".into();
++        }
++        String::new()
++    }
++    fn sync_context(&mut self) {
++        let current = project_path();
++        if self.current != current {
++            self.current = current;
++            self.dirty = true;
++        }
++    }
++    fn publish(&mut self, app: &App) {
++        self.sync_context();
++        app.set_download_message(self.fault.as_deref().unwrap_or(&self.message).into());
++        app.set_download_message_tone(if self.fault.is_some() { 2 } else { self.tone });
++        app.set_download_busy(self.active.is_some());
++        app.set_download_available(self.fault.is_none());
++        app.set_download_account(self.engine.data.join("account.dpapi").exists());
++        app.set_download_tools(self.tools.clone().into());
++        app.set_download_project(
++            self.current
++                .as_ref()
++                .map(|p| {
++                    p.file_name()
++                        .unwrap_or_default()
++                        .to_string_lossy()
++                        .into_owned()
++                })
++                .unwrap_or_default()
++                .into(),
++        );
++        app.set_download_can_parse(
++            self.active.is_none() && self.tools_ready && self.fault.is_none(),
++        );
++        app.set_download_parsing(self.active.as_ref().is_some_and(|a| a.kind == Work::Parse));
++        let error = self.form_error();
++        app.set_download_form_valid(error.is_empty());
++        app.set_download_form_error(error.into());
++        let pending = self
++            .queue
++            .jobs
++            .iter()
++            .any(|j| matches!(j.status, Status::Queued | Status::Running));
++        app.set_download_can_pause_all(
++            self.fault.is_none()
++                && (pending || self.active.as_ref().is_some_and(|a| a.kind == Work::Parse)),
++        );
++        app.set_download_can_resume_all(
++            self.fault.is_none()
++                && self.tools_ready
++                && self
++                    .active
++                    .as_ref()
++                    .is_none_or(|a| !a.cancel.load(Ordering::SeqCst))
++                && self.queue.jobs.iter().any(|j| {
++                    j.status == Status::Paused || (j.status == Status::Queued && !self.autorun)
++                }),
++        );
++        let activity = if let Some(a) = &self.active {
++            let what = if a.cancel.load(Ordering::SeqCst) {
++                "正在停止"
++            } else {
++                match a.kind {
++                    Work::Parse => "解析画质",
++                    Work::Download(_) => "下载与校验",
++                    Work::Import(_) => "准备入库",
++                    Work::Check => "检查组件",
++                }
++            };
++            format!("{what} · {} 秒", a.started.elapsed().as_secs())
++        } else if !self.autorun && self.queue.jobs.iter().any(|j| j.status == Status::Queued) {
++            "队列已暂停".into()
++        } else {
++            "本地剪辑可继续".into()
++        };
++        app.set_download_activity(activity.into());
++        if !self.dirty {
++            return;
++        }
++        let count = |status| {
++            self.queue
++                .jobs
++                .iter()
++                .filter(|j| j.status == status)
++                .count()
++        };
++        app.set_download_stats(
++            format!(
++                "{} 个任务   ·   {} 等待   {} 待入库   {} 完成",
++                self.queue.jobs.len(),
++                count(Status::Queued) + count(Status::Paused),
++                count(Status::Ready),
++                count(Status::Imported)
++            )
++            .into(),
++        );
++        let rows = self
++            .queue
++            .jobs
++            .iter()
++            .rev()
++            .filter(|j| actions::matches_filter(j, self.filter, &self.query))
++            .map(|job| {
++                let active = self
++                    .active
++                    .as_ref()
++                    .is_some_and(|a| a.kind.id() == Some(job.id.as_str()));
++                let rules = job.actions(active);
++                let matches = self
++                    .current
++                    .as_ref()
++                    .is_some_and(|p| same_path(p, &job.target));
++                let status = if active
++                    && self
++                        .active
++                        .as_ref()
++                        .is_some_and(|a| a.cancel.load(Ordering::SeqCst))
++                {
++                    "正在停止"
++                } else if active
++                    && self
++                        .active
++                        .as_ref()
++                        .is_some_and(|a| matches!(a.kind, Work::Import(_)))
++                {
++                    "入库中"
++                } else {
++                    match job.status {
++                        Status::Queued => {
++                            if self.autorun {
++                                "排队"
++                            } else {
++                                "等待继续"
++                            }
++                        }
++                        Status::Running => "下载中",
++                        Status::Paused => "已暂停",
++                        Status::Failed => "失败",
++                        Status::Ready => "待入库",
++                        Status::Imported => "已入库",
++                        Status::Cancelled => "已取消",
++                    }
++                };
++                let specs = job
++                    .assets
++                    .iter()
++                    .map(|a| {
++                        format!(
++                            "{}×{} · {} · {} fps",
++                            a.width, a.height, a.codec, a.frame_rate
++                        )
++                    })
++                    .collect::<Vec<_>>()
++                    .join(" / ");
++                let detail = if specs.is_empty() {
++                    format!(
++                        "画质 {} · {}",
++                        job.quality,
++                        if job.allow_lower {
++                            "允许降档"
++                        } else {
++                            "不降档"
++                        }
++                    )
++                } else {
++                    specs
++                };
++                let hint = job.error.clone().unwrap_or_else(|| {
++                    if job.status == Status::Ready && !matches {
++                        "打开绑定工程后再导入，素材不会进入其他工程。".into()
++                    } else if job.status == Status::Imported {
++                        "已保存到工程素材库，可拖入时间线。".into()
++                    } else if matches!(job.status, Status::Paused | Status::Cancelled) {
++                        "已下载文件和恢复检查点保留。".into()
++                    } else {
++                        String::new()
++                    }
++                });
++                DownloadJobData {
++                    id: job.id.clone().into(),
++                    title: format!("{} · P{}", job.input, job.parts).into(),
++                    status: status.into(),
++                    detail: detail.into(),
++                    target: job
++                        .target
++                        .file_name()
++                        .unwrap_or_default()
++                        .to_string_lossy()
++                        .into_owned()
++                        .into(),
++                    hint: hint.into(),
++                    tone: if job.error.is_some() {
++                        2
++                    } else if active {
++                        1
++                    } else {
++                        0
++                    },
++                    resumable: rules.resume && (self.tools_ready || !job.assets.is_empty()),
++                    stoppable: rules.pause,
++                    cancellable: rules.cancel,
++                    removable: rules.remove,
++                    importable: rules.import && matches,
++                    revealable: self.engine.data.join("jobs").join(&job.id).is_dir(),
++                    switchable: job.status == Status::Ready && !matches,
++                }
++            })
++            .collect::<Vec<_>>();
++        self.rows.set_vec(rows);
++        self.dirty = false;
++    }
++    fn launch(&mut self, kind: Work, f: impl FnOnce(Arc<AtomicBool>) -> Done + Send + 'static) {
++        let cancel = Arc::new(AtomicBool::new(false));
++        let flag = cancel.clone();
++        let tx = self.tx.clone();
++        let worker = thread::spawn(move || {
++            let done = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(flag)))
++                .unwrap_or(Done::Crashed);
++            let _ = tx.send(done);
++        });
++        self.active = Some(Active {
++            kind,
++            cancel,
++            worker,
++            started: Instant::now(),
++        });
++        self.dirty = true;
++    }
++    fn launch_parse(&mut self, input: String) {
++        if !self.network_ready() {
++            return;
++        }
++        if self.active.is_some() {
++            self.tell("当前任务结束后再解析；仍可添加排队任务。", 0);
++            return;
++        }
++        if let Err(e) = cutflow_download::validate_input(&input) {
++            self.tell(e, 2);
++            return;
++        }
++        let engine = self.engine.clone();
++        self.tell("正在查询当前账号可用画质…", 1);
++        self.launch(Work::Parse, move |flag| {
++            Done::Parsed(engine.parse(&input, &flag))
++        });
++    }
++    fn enqueue(&mut self, input: String, parts: String, quality: i32, lower: bool, rights: String) {
++        self.sync_context();
++        if !self.network_ready() {
++            return;
++        }
++        let Some(target) = self.current.clone() else {
++            self.tell("请先新建或打开剪辑工程。", 2);
++            return;
++        };
++        let quality = match quality {
++            0 => "120",
++            1 => "80",
++            2 => "best",
++            _ => {
++                self.tell("无效画质选项", 2);
++                return;
++            }
++        };
++        match self.queue.enqueue(
++            &input,
++            &parts,
++            quality,
++            lower && quality != "best",
++            target,
++            &rights,
++        ) {
++            Ok(_) => {
++                // An error-paused queue remains paused when another task is added.
++                let held = self
++                    .queue
++                    .jobs
++                    .iter()
++                    .any(|j| matches!(j.status, Status::Failed | Status::Paused))
++                    && !self.autorun;
++                if self.persist() {
++                    if !held {
++                        self.autorun = true;
++                    }
++                    self.tell(
++                        if held {
++                            "任务已添加；队列暂停中，请点击继续队列。"
++                        } else {
++                            "任务已加入队列，完成后自动校验并入库。"
++                        },
++                        1,
++                    );
++                }
++            }
++            Err(e) => self.tell(e, 2),
++        }
++    }
++    fn next_download(&mut self) {
++        if self.active.is_some() || !self.autorun || self.fault.is_some() || !self.tools_ready {
++            return;
++        }
++        let Some(index) = self
++            .queue
++            .jobs
++            .iter()
++            .position(|j| j.status == Status::Queued)
++        else {
++            return;
++        };
++        self.queue.jobs[index].status = Status::Running;
++        if !self.persist() {
++            self.queue.jobs[index].status = Status::Paused;
++            return;
++        }
++        let job = self.queue.jobs[index].clone();
++        let id = job.id.clone();
++        let engine = self.engine.clone();
++        self.tell("正在下载母版；校验通过后才会入库。", 1);
++        self.launch(Work::Download(id), move |flag| {
++            Done::Downloaded(job.id.clone(), engine.download(&job, flag))
++        });
++    }
++    fn prepare_import(&mut self, id: &str) {
++        self.sync_context();
++        if !self.writable() {
++            return;
++        }
++        if self.active.is_some() {
++            self.tell("请等待当前处理结束后再导入。", 0);
++            return;
++        }
++        let Some(job) = self
++            .queue
++            .jobs
++            .iter()
++            .find(|j| j.id == id && j.status == Status::Ready)
++            .cloned()
++        else {
++            self.tell("该任务当前没有可入库的完成素材。", 2);
++            return;
++        };
++        if !self
++            .current
++            .as_ref()
++            .is_some_and(|p| same_path(p, &job.target))
++        {
++            self.tell("请先切换到此任务绑定的工程。", 2);
++            return;
++        }
++        if let Some(held) = self.queue.jobs.iter_mut().find(|j| j.id == id) {
++            held.error = None;
++        }
++        self.tell("正在校验媒体并准备导入绑定工程…", 1);
++        self.launch(Work::Import(job.id.clone()), move |flag| {
++            let results = job
++                .assets
++                .iter()
++                .map(|a| {
++                    if flag.load(Ordering::SeqCst) {
++                        return Err("已停止入库".into());
++                    }
++                    if std::fs::metadata(&a.path).map(|m| m.len()).ok() != Some(a.bytes) {
++                        return Err("媒体已改变或丢失，请检查母版文件。".into());
++                    }
++                    media::probe(&a.path.to_string_lossy())
++                })
++                .collect();
++            Done::Probed(job.id, results)
++        });
++    }
++    fn commit_import(&mut self, id: &str, results: Vec<cutflow_download::Result<MediaSummary>>) {
++        if self.fault.is_some() {
++            return;
++        }
++        let Some(job) = self
++            .queue
++            .jobs
++            .iter_mut()
++            .find(|j| j.id == id && j.status == Status::Ready)
++        else {
++            return;
++        };
++        let summaries = match results
++            .into_iter()
++            .collect::<cutflow_download::Result<Vec<_>>>()
++        {
++            Ok(s) => s,
++            Err(e) => {
++                job.error = Some(e.clone());
++                self.tell(e, 2);
++                return;
++            }
++        };
++        let mut result = Err("当前工程已切换，素材保持待入库状态。".to_string());
++        Shell::with(|shell, app| {
++            let mut studio = shell.studio.borrow_mut();
++            if !studio
++                .session
++                .as_ref()
++                .is_some_and(|s| same_path(Path::new(s.path()), &job.target))
++            {
++                return;
++            }
++            let commands = summaries
++                .iter()
++                .filter(|s| {
++                    !studio
++                        .project()
++                        .media
++                        .iter()
++                        .any(|m| same_path(Path::new(&m.path), Path::new(&s.path)))
++                })
++                .map(|s| Command::AddMedia {
++                    item: s.to_new_media(),
++                })
++                .collect::<Vec<_>>();
++            if !commands.is_empty() {
++                studio.apply(Command::Batch { commands });
++            }
++            if !job.assets.iter().all(|a| {
++                studio
++                    .project()
++                    .media
++                    .iter()
++                    .any(|m| same_path(Path::new(&m.path), &a.path))
++            }) {
++                result = Err("部分素材被编辑器拒绝，请检查格式兼容性。".into());
++                return;
++            }
++            result = studio
++                .session
++                .as_mut()
++                .ok_or("工程已关闭".to_string())
++                .and_then(|s| s.save(None));
++            if result.is_ok() {
++                studio.refresh_art();
++                studio.notify("下载素材已入库并保存。", false);
++            }
++            studio.publish(&app, &shell.models);
++        });
++        match result {
++            Ok(()) => {
++                job.status = Status::Imported;
++                job.error = None;
++                for a in &mut job.assets {
++                    a.imported = true;
++                }
++                self.tell("素材已进入绑定工程，可拖入时间线剪辑。", 1);
++            }
++            Err(e) => {
++                job.error = Some(e.clone());
++                self.tell(e, 2);
++            }
++        }
++    }
++    fn action(&mut self, id: &str, action: Action) {
++        if !self.writable() {
++            return;
++        }
++        let active = self
++            .active
++            .as_ref()
++            .is_some_and(|a| a.kind.id() == Some(id));
++        if matches!(action, Action::Resume)
++            && self
++                .queue
++                .jobs
++                .iter()
++                .find(|j| j.id == id)
++                .is_some_and(|j| j.assets.is_empty())
++            && !self.network_ready()
++        {
++            return;
++        }
++        match self.queue.action(id, action, active) {
++            Err(e) => self.tell(e, 2),
++            Ok(()) => {
++                if active && matches!(action, Action::Pause | Action::Cancel) {
++                    if let Some(a) = &self.active {
++                        a.cancel.store(true, Ordering::SeqCst);
++                    }
++                }
++                if self.persist() {
++                    if matches!(action, Action::Resume) {
++                        self.autorun = true;
++                    }
++                    self.tell(
++                        match action {
++                            Action::Pause => "任务已暂停；其他排队任务按原顺序继续。",
++                            Action::Cancel => "任务已取消，已下载文件保留。",
++                            Action::Resume => "任务已重新排队。",
++                            Action::Remove => "任务记录已移除，媒体文件和工程保留。",
++                        },
++                        1,
++                    );
++                }
++            }
++        }
++    }
++    fn pause_all(&mut self) {
++        if !self.writable() {
++            return;
++        }
++        self.autorun = false;
++        self.queue.pause_all();
++        if let Some(a) = &self.active {
++            if matches!(a.kind, Work::Download(_) | Work::Parse) {
++                a.cancel.store(true, Ordering::SeqCst);
++            }
++        }
++        if self.persist() {
++            self.tell("队列已暂停；已下载文件和恢复检查点保留。", 1);
++        }
++    }
++    fn resume_all(&mut self) {
++        if !self.network_ready() {
++            return;
++        }
++        if self
++            .active
++            .as_ref()
++            .is_some_and(|a| a.cancel.load(Ordering::SeqCst))
++        {
++            self.tell("正在停止组件，请稍后继续。", 0);
++            return;
++        }
++        let count = self.queue.resume_waiting();
++        if self.persist() {
++            self.autorun = true;
++            self.tell(
++                format!("已继续 {count} 个等待任务；失败和取消任务需单独重试。"),
++                1,
++            );
++        }
++    }
++    fn reveal(&mut self, id: &str) {
++        if !self.queue.jobs.iter().any(|j| j.id == id) {
++            self.tell("任务不存在", 2);
++            return;
++        }
++        let dir = self.engine.data.join("jobs").join(id);
++        let media = dir.join("media");
++        if let Err(e) = open_folder(if media.is_dir() { &media } else { &dir }) {
++            self.tell(e, 2);
++        }
++    }
++    fn check(&mut self) {
++        if self.active.is_some() {
++            self.tell("当前任务结束后再检查组件。", 0);
++            return;
++        }
++        let engine = self.engine.clone();
++        self.tell("正在本地检查组件版本与可执行状态…", 1);
++        self.launch(Work::Check, move |flag| {
++            Done::Checked(engine.check_components(&flag))
++        });
++    }
++    fn switch_project(&mut self, id: &str) {
++        if self.active.is_some() {
++            self.tell("当前处理结束后再切换工程。", 0);
++            return;
++        }
++        let Some(target) = self
++            .queue
++            .jobs
++            .iter()
++            .find(|j| j.id == id)
++            .map(|j| j.target.clone())
++        else {
++            self.tell("任务不存在", 2);
++            return;
++        };
++        let info = match concat_host::projects::open(&target.to_string_lossy()) {
++            Ok(info) => info,
++            Err(e) => {
++                self.tell(e, 2);
++                return;
++            }
++        };
++        let mut result = Ok(());
++        Shell::with(|shell, app| {
++            let mut studio = shell.studio.borrow_mut();
++            studio.close_project();
++            if studio.session.is_some() {
++                result = Err("当前工程保存失败，已取消切换。".into());
++                return;
++            }
++            result = studio.open_project(info);
++            studio.publish(&app, &shell.models);
++        });
++        match result {
++            Ok(()) => self.tell("已切换到绑定工程；校验通过后自动入库。", 1),
++            Err(e) => self.tell(e, 2),
++        }
++    }
++    fn tick(&mut self, app: &App) {
++        self.sync_context();
++        while let Ok(done) = self.rx.try_recv() {
++            let Some(active) = self.active.take() else {
++                continue;
++            };
++            let stopped = active.cancel.load(Ordering::SeqCst);
++            let kind = active.kind;
++            let _ = active.worker.join();
++            self.dirty = true;
++            match done {
++                Done::Parsed(result) => {
++                    if stopped {
++                        self.tell("解析已取消。", 0);
++                    } else {
++                        match result {
++                            Ok(text) => {
++                                app.set_download_formats(text.into());
++                                self.tell("解析完成，选择分 P 和画质后加入队列。", 1);
++                            }
++                            Err(e) => {
++                                self.autorun = false;
++                                self.tell(e, 2);
++                            }
++                        }
++                    }
++                }
++                Done::Downloaded(id, result) => {
++                    let mut error = None;
++                    let mut ready = false;
++                    if let Some(job) = self.queue.jobs.iter_mut().find(|j| j.id == id) {
++                        let kept = matches!(job.status, Status::Paused | Status::Cancelled);
++                        match result {
++                            Ok(assets) => {
++                                job.assets = assets;
++                                if !kept {
++                                    job.status = Status::Ready;
++                                    job.error = None;
++                                    ready = true;
++                                }
++                            }
++                            Err(e) => {
++                                if !kept {
++                                    job.status = Status::Failed;
++                                    job.error = Some(e.clone());
++                                    error = Some(e);
++                                }
++                            }
++                        }
++                    }
++                    self.persist();
++                    if let Some(e) = error {
++                        self.autorun = false;
++                        self.tell(e, 2);
++                    } else if ready {
++                        self.tell("下载校验完成，等待导入绑定工程。", 1);
++                    }
++                }
++                Done::Probed(id, results) => {
++                    if !stopped {
++                        self.commit_import(&id, results);
++                    }
++                    self.persist();
++                }
++                Done::Checked(result) => match result {
++                    Ok(report) => {
++                        self.tools_ready = true;
++                        self.tools = report;
++                        self.tell("三个组件已通过本地启动检查。", 1);
++                    }
++                    Err(e) => {
++                        self.tools_ready = false;
++                        let missing = self.engine.missing_components();
++                        self.tools = if missing.is_empty() {
++                            "组件存在，但启动检查失败；请检查 DLL 和版本。".into()
++                        } else {
++                            format!("缺少组件：{}", missing.join("、"))
++                        };
++                        self.tell(e, 2);
++                    }
++                },
++                Done::Crashed => {
++                    self.autorun = false;
++                    if let Some(id) = kind.id() {
++                        if let Some(job) = self.queue.jobs.iter_mut().find(|j| j.id == id) {
++                            if !matches!(job.status, Status::Paused | Status::Cancelled) {
++                                if matches!(kind, Work::Download(_)) {
++                                    job.status = Status::Failed;
++                                }
++                                job.error = Some("后台任务异常退出，可手动重试。".into());
++                            }
++                        }
++                    }
++                    self.persist();
++                    self.tell("后台任务异常退出；队列已暂停。", 2);
++                }
++            }
++        }
++        if self.active.is_none() && self.fault.is_none() {
++            let next = self
++                .queue
++                .jobs
++                .iter()
++                .find(|j| {
++                    j.status == Status::Ready
++                        && j.error.is_none()
++                        && self
++                            .current
++                            .as_ref()
++                            .is_some_and(|p| same_path(p, &j.target))
++                })
++                .map(|j| j.id.clone());
++            if let Some(id) = next {
++                self.prepare_import(&id);
++            }
++        }
++        self.next_download();
++        self.publish(app);
++    }
++}
++
++/// Keeps all task workers under the lifetime of the editor window.
++pub struct Downloads {
++    state: Rc<RefCell<State>>,
++    timer: slint::Timer,
++}
++impl Downloads {
++    pub fn install(app: &App) -> Self {
++        let root = std::env::var_os("LOCALAPPDATA")
++            .map(PathBuf::from)
++            .or_else(|| std::env::var_os("XDG_STATE_HOME").map(PathBuf::from))
++            .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/state")))
++            .unwrap_or_else(std::env::temp_dir)
++            .join("CutFlow");
++        let tools = std::env::current_exe()
++            .ok()
++            .and_then(|p| p.parent().map(|p| p.join("tools")))
++            .unwrap_or_default();
++        let lock = (|| -> Result<std::fs::File, String> {
++            std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
++            let file = std::fs::OpenOptions::new()
++                .create(true)
++                .truncate(false)
++                .read(true)
++                .write(true)
++                .open(root.join("queue.lock"))
++                .map_err(|e| e.to_string())?;
++            file.try_lock()
++                .map_err(|_| "另一个 CutFlow 实例正在管理下载任务。".to_string())?;
++            Ok(file)
++        })();
++        // Lock before reading, so another writer cannot change our initial snapshot.
++        let (mut fault, lock) = match lock {
++            Ok(f) => (None, Some(f)),
++            Err(e) => (Some(e), None),
++        };
++        let queue = match Queue::load(&root) {
++            Ok(q) => q,
++            Err(e) => {
++                fault = Some(format!("任务文件读取失败，禁止覆盖：{e}"));
++                Queue {
++                    version: 1,
++                    jobs: vec![],
++                }
++            }
++        };
++        let engine = Engine { tools, data: root };
++        let missing = engine.missing_components();
++        let ready = missing.is_empty();
++        let tools = if ready {
++            "组件文件已找到；可点击检查组件确认版本。".into()
++        } else {
++            format!("缺少 {}；打开组件目录查看。", missing.join("、"))
++        };
++        let (tx, rx) = mpsc::channel();
++        let rows = Rc::new(VecModel::default());
++        app.set_download_jobs(ModelRc::from(rows.clone()));
++        let state = Rc::new(RefCell::new(State {
++            queue,
++            engine,
++            tx,
++            rx,
++            active: None,
++            autorun: false,
++            fault,
++            message: "下载任务绑定创建时的工程；关闭面板可继续剪辑。".into(),
++            tone: 0,
++            tools,
++            tools_ready: ready,
++            filter: 0,
++            query: String::new(),
++            form: Form {
++                parts: "1".into(),
++                ..Default::default()
++            },
++            current: None,
++            rows,
++            dirty: true,
++            _lock: lock,
++        }));
++        macro_rules! bind {($callback:ident, |$s:ident $(,$arg:ident)*| $body:block)=>{{let held=state.clone();app.$callback(move |$($arg),*|{let mut $s=held.borrow_mut();$body});}};}
++        {
++            let weak = app.as_weak();
++            let state = state.clone();
++            app.on_download_open(move || {
++                if let Some(app) = weak.upgrade() {
++                    state.borrow_mut().publish(&app);
++                    app.set_download_opened(true);
++                }
++            });
++        }
++        {
++            let weak = app.as_weak();
++            app.on_download_close(move || {
++                if let Some(app) = weak.upgrade() {
++                    app.set_download_opened(false);
++                }
++            });
++        }
++        bind!(
++            on_download_form_changed,
++            |s, input, parts, quality, _lower, rights| {
++                s.form = Form {
++                    input: input.to_string(),
++                    parts: parts.to_string(),
++                    quality,
++                    rights: rights.to_string(),
++                };
++                Shell::with(|_, app| s.publish(&app));
++            }
++        );
++        bind!(on_download_parse, |s, input| {
++            s.launch_parse(input.to_string());
++        });
++        bind!(
++            on_download_enqueue,
++            |s, input, parts, quality, lower, rights| {
++                s.enqueue(
++                    input.to_string(),
++                    parts.to_string(),
++                    quality,
++                    lower,
++                    rights.to_string(),
++                );
++            }
++        );
++        bind!(on_download_pause, |s, id| {
++            s.action(&id, Action::Pause);
++        });
++        bind!(on_download_resume, |s, id| {
++            s.action(&id, Action::Resume);
++        });
++        bind!(on_download_cancel, |s, id| {
++            s.action(&id, Action::Cancel);
++        });
++        bind!(on_download_remove, |s, id| {
++            s.action(&id, Action::Remove);
++        });
++        bind!(on_download_import, |s, id| {
++            s.prepare_import(&id);
++        });
++        bind!(on_download_reveal, |s, id| {
++            s.reveal(&id);
++        });
++        bind!(on_download_switch_project, |s, id| {
++            s.switch_project(&id);
++        });
++        bind!(on_download_pause_all, |s| {
++            s.pause_all();
++        });
++        bind!(on_download_resume_all, |s| {
++            s.resume_all();
++        });
++        bind!(on_download_stop_parse, |s| {
++            if let Some(a) = &s.active {
++                if a.kind == Work::Parse {
++                    a.cancel.store(true, Ordering::SeqCst);
++                    s.dirty = true;
++                }
++            }
++        });
++        bind!(on_download_check_tools, |s| {
++            s.check();
++        });
++        bind!(on_download_reveal_tools, |s| {
++            let tools = if s.engine.tools.is_dir() {
++                s.engine.tools.clone()
++            } else {
++                s.engine
++                    .tools
++                    .parent()
++                    .unwrap_or(Path::new("."))
++                    .to_path_buf()
++            };
++            if let Err(e) = open_folder(&tools) {
++                s.tell(e, 2);
++            }
++        });
++        bind!(on_download_filter_changed, |s, filter, query| {
++            s.filter = filter;
++            s.query = query.to_string();
++            s.dirty = true;
++        });
++        bind!(on_download_save_cookie, |s, cookie| {
++            if s.writable() {
++                if s.active.is_some() {
++                    s.tell("任务处理期间不能替换账号。", 2);
++                } else {
++                    match cutflow_download::credentials::save(&s.engine.data, &cookie) {
++                        Ok(()) => s.tell("凭据已加密保存；请重新解析以检查实际权限。", 1),
++                        Err(e) => s.tell(e, 2),
++                    }
++                }
++            }
++        });
++        bind!(on_download_clear_cookie, |s| {
++            if s.writable() {
++                if s.active.is_some() {
++                    s.tell("请先停止任务，再退出账号。", 2);
++                } else {
++                    match cutflow_download::credentials::clear(&s.engine.data) {
++                        Ok(()) => s.tell("已退出账号，本地媒体与工程保留。", 1),
++                        Err(e) => s.tell(e, 2),
++                    }
++                }
++            }
++        });
++        {
++            let weak = app.as_weak();
++            let state = state.clone();
++            app.on_download_choose_project(move |create| {
++                if state.borrow().active.is_some() {
++                    state.borrow_mut().tell("任务处理结束后再切换工程。", 0);
++                    return;
++                }
++                if let Err(e) = save_current() {
++                    state.borrow_mut().tell(format!("当前工程保存失败：{e}"), 2);
++                    return;
++                }
++                if let Some(app) = weak.upgrade() {
++                    app.set_download_opened(false);
++                    if create {
++                        app.invoke_start_compose();
++                    } else {
++                        app.invoke_start_open();
++                    }
++                }
++            });
++        }
++        let timer = slint::Timer::default();
++        {
++            let held = state.clone();
++            let weak = app.as_weak();
++            timer.start(
++                slint::TimerMode::Repeated,
++                std::time::Duration::from_millis(250),
++                move || {
++                    if let Some(app) = weak.upgrade() {
++                        held.borrow_mut().tick(&app);
++                    }
++                },
++            );
++        }
++        state.borrow_mut().publish(app);
++        Self { state, timer }
++    }
++    pub fn shutdown(&self) {
++        self.timer.stop();
++        let mut s = self.state.borrow_mut();
++        s.autorun = false;
++        s.queue.pause_all();
++        if let Some(active) = s.active.take() {
++            active.cancel.store(true, Ordering::SeqCst);
++            s.persist();
++            let _ = active.worker.join();
++        } else {
++            s.persist();
++        }
++    }
++}
+--- a/src/crates/concat/src/lib.rs
++++ b/src/crates/concat/src/lib.rs
+@@ -33,6 +33,7 @@
+ 
+ mod chips;
+ mod dock;
++mod downloads;
+ mod fonts;
+ mod format;
+ mod gpu;
+@@ -280,6 +281,7 @@
+         models: Models::new(),
+     });
+     Shell::install(shell.clone());
++    let downloads = downloads::Downloads::install(&app);
+ 
+     // The machine's fonts, for the Text inspector's picker. Read on a
+     // worker: on a machine with a few thousand faces it is a moment, and
+@@ -2014,6 +2016,7 @@
+     );
+ 
+     let result = app.run();
++    downloads.shutdown();
+     drop(reader_sweep);
+     log::info!("close: event loop exited (ok={})", result.is_ok());
+     // The loop failing is the window never having run at all - on a phone
+--- a/src/crates/concat/ui/app.slint
++++ b/src/crates/concat/ui/app.slint
+@@ -16,6 +16,7 @@
+ import "../../concat-text/fonts/HankenGrotesk-Bold.ttf";
+ import "../../concat-text/fonts/HankenGrotesk-Italic.ttf";
+ 
++import { DownloadDialog, DownloadJobData } from "dialogs/downloads.slint";
+ import { Theme } from "theme/theme.slint";
+ import { Bezier, Curves, Fmt, Focus, Payload } from "util.slint";
+ import { EffectData } from "demo/effects-panel.slint";
+@@ -53,7 +54,7 @@
+ import { KeyEditor, KeyMarkData, KeyRowData } from "workspace/keyframes-pane.slint";
+ 
+ export {
+-    Curves, Fmt, Focus, Payload, Theme, Bezier, Editor, I18n,
++    Curves, Fmt, Focus, Payload, Theme, Bezier, Editor, I18n, DownloadJobData,
+     AppliedEntryData, AppliedParamData, CatalogueEntryData, Library, LibraryViewData, ParamFormat,
+     DockDivider, DockSide, PaneKind, SeatBox,
+     EffectData, FontSearch, Meters, MediaFilter, MediaItemData, MediaKind, SourcePreview, TextPresetData,
+@@ -66,11 +67,11 @@
+ }
+ 
+ export component App inherits Window {
+-    title: "Concat";
++    title: "CutFlow";
+     // The taskbar's and Alt-Tab's picture on Windows, and the window
+     // list's on X11. A Mac takes its Dock icon from the bundle and ignores
+     // this; the .exe's own, for Explorer, is embedded by build.rs.
+-    icon: @image-url("../../../../assets/icons/concat_logo_256.png");
++    icon: @image-url("../../../../assets/icons/cutflow_256.png");
+     // Where the strip carries its own window buttons the platform's
+     // decorations are not wanted, and this is the property Slint keeps
+     // them off with: the winit backend re-applies `no-frame` to the
+@@ -115,7 +116,7 @@
+             keys.focus();
+         }
+     }
+-    property <bool> sheet-open: root.export.open || root.settings.open
++    property <bool> sheet-open: root.download-opened || root.export.open || root.settings.open
+         || root.project-sheet.open || root.captions.open || root.speech.open
+         || root.start.composing;
+     changed sheet-open => {
+@@ -127,6 +128,46 @@
+     // The editor's own state and actions live on the Editor global rather
+     // than here — see editor.slint. What is left on the window is the window:
+     // its title bar, its menus, and the two sheets that cover everything.
++
++    in-out property <bool> download-opened;
++    in property <bool> download-busy;
++    in property <bool> download-account;
++    in property <string> download-message;
++    in property <string> download-formats;
++    in property <[DownloadJobData]> download-jobs;
++    in property <int> download-message-tone;
++    in property <bool> download-available;
++    in property <string> download-tools;
++    in property <string> download-project;
++    in property <string> download-stats;
++    in property <string> download-activity;
++    in property <string> download-form-error;
++    in property <bool> download-form-valid;
++    in property <bool> download-can-parse;
++    in property <bool> download-parsing;
++    in property <bool> download-can-pause-all;
++    in property <bool> download-can-resume-all;
++    callback download-open();
++    callback download-close();
++    callback download-parse(string);
++    callback download-enqueue(string, string, int, bool, string);
++    callback download-form-changed(string, string, int, bool, string);
++    callback download-pause(string);
++    callback download-resume(string);
++    callback download-cancel(string);
++    callback download-import(string);
++    callback download-remove(string);
++    callback download-reveal(string);
++    callback download-switch-project(string);
++    callback download-pause-all();
++    callback download-resume-all();
++    callback download-stop-parse();
++    callback download-check-tools();
++    callback download-reveal-tools();
++    callback download-choose-project(bool);
++    callback download-filter-changed(int, string);
++    callback download-save-cookie(string);
++    callback download-clear-cookie();
+ 
+     // ── the launch screen ────────────────────────────────────────────────
+     //
+@@ -329,7 +370,8 @@
+     /// every press that is not on the text input holding the focus, so a
+     /// click on a clip, a knob or the monitor ends the editing too.
+     public function blur() {
+-        keys.focus();
++        if (root.download-opened) { download-sheet.focus-surface(); }
++        else { keys.focus(); }
+     }
+ 
+     // The strip's menus from the keyboard, the way Windows and Linux reach
+@@ -401,49 +443,50 @@
+             keys: @keys(Control + S);
+             // Nothing on the launch screen has a project to act on, which is
+             // why the strip up there is missing the menus this belongs to.
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { root.app-menu-selected("save"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + Z);
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { root.app-menu-selected("undo"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + Shift + Z);
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { root.app-menu-selected("redo"); }
+         }
+         // Windows and Linux redo on Ctrl+Y as well; on a Mac ⌘Y is not redo.
+         KeyBinding {
+             keys: @keys(Control + Y);
+-            enabled: !root.on-start && !root.macos;
++            enabled: !root.sheet-open && !root.on-start && !root.macos;
+             activated => { root.app-menu-selected("redo"); }
+         }
+         KeyBinding {
+             keys: @keys(F10);
+-            enabled: !root.on-start && !root.macos && !root.phone;
++            enabled: !root.sheet-open && !root.on-start && !root.macos && !root.phone;
+             activated => { root.open-menu-from-keys(0); }
+         }
+         KeyBinding {
+             keys: @keys(Alt + F);
+-            enabled: !root.on-start && !root.macos && !root.phone;
++            enabled: !root.sheet-open && !root.on-start && !root.macos && !root.phone;
+             activated => { root.open-menu-from-keys(0); }
+         }
+         KeyBinding {
+             keys: @keys(Alt + E);
+-            enabled: !root.on-start && !root.macos && !root.phone;
++            enabled: !root.sheet-open && !root.on-start && !root.macos && !root.phone;
+             activated => { root.open-menu-from-keys(1); }
+         }
+         KeyBinding {
+             keys: @keys(Alt + V);
+-            enabled: !root.on-start && !root.macos && !root.phone;
++            enabled: !root.sheet-open && !root.on-start && !root.macos && !root.phone;
+             activated => { root.open-menu-from-keys(2); }
+         }
+         // Open and leaving work from the launch screen too: it opens
+         // projects, and it is a window.
+         KeyBinding {
+             keys: @keys(Control + O);
++            enabled: !root.sheet-open;
+             activated => { root.app-menu-selected("open"); }
+         }
+         // ⌘W closes the window on a Mac. Elsewhere Ctrl+W closes the
+@@ -451,7 +494,7 @@
+         // the system's, and arrives as the window's close request.
+         KeyBinding {
+             keys: @keys(Control + W);
+-            enabled: root.macos || !root.on-start;
++            enabled: !root.sheet-open && (root.macos || !root.on-start);
+             activated => {
+                 root.app-menu-selected(root.macos ? "close-window" : "close-project");
+             }
+@@ -464,59 +507,59 @@
+         // The editor's chords, each the shortcut its menu row names.
+         KeyBinding {
+             keys: @keys(Control + B);
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("split"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + A);
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("select-all"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + C);
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("copy"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + V);
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("paste"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + D);
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("duplicate"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + E);
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("export"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + I);
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("import"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + ",");
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("settings"); }
+         }
+         // Zoom in on = as well as +: they share a key on most layouts, and
+         // nobody reaches for Shift to zoom.
+         KeyBinding {
+             keys: @keys(Control + "=");
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("zoom-in"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + Plus);
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("zoom-in"); }
+         }
+         KeyBinding {
+             keys: @keys(Control + "-");
+-            enabled: !root.on-start;
++            enabled: !root.sheet-open && !root.on-start;
+             activated => { Editor.shortcut("zoom-out"); }
+         }
+ 
+@@ -528,7 +571,7 @@
+         // before a key can walk up to this scope, which is what keeps
+         // typing a title from cutting a clip.
+         key-pressed(event) => {
+-            if (root.on-start) {
++            if (root.on-start || root.sheet-open) {
+                 return reject;
+             }
+             // A chord is the bindings' above; one they did not take is
+@@ -624,6 +667,7 @@
+                 toggle-maximize => { root.titlebar-toggle-maximize(); }
+                 minimize => { root.titlebar-minimize(); }
+                 close => { root.titlebar-close(); }
++                open-downloads => { root.download-open(); }
+                 open-settings => { root.open-settings(); }
+                 add-pane(kind) => { Editor.dock-add(kind); }
+                 export-clicked => { root.export-clicked(); }
+@@ -729,6 +773,48 @@
+         cancel => { root.export-cancel(); }
+         reveal => { root.export-reveal(); }
+         again => { root.export-again(); }
++    }
++
++    download-sheet := DownloadDialog {
++        x: 0; y: 0; width: root.width; height: root.height;
++        open: root.download-opened;
++        jobs: root.download-jobs;
++        message: root.download-message;
++        formats: root.download-formats;
++        busy: root.download-busy;
++        account-set: root.download-account;
++        message-tone: root.download-message-tone;
++        available: root.download-available;
++        tools: root.download-tools;
++        project: root.download-project;
++        stats: root.download-stats;
++        activity: root.download-activity;
++        form-error: root.download-form-error;
++        form-valid: root.download-form-valid;
++        can-parse: root.download-can-parse;
++        parsing: root.download-parsing;
++        can-pause-all: root.download-can-pause-all;
++        can-resume-all: root.download-can-resume-all;
++        closed => { root.download-close(); }
++        parse(input) => { root.download-parse(input); }
++        enqueue(input, parts, quality, lower, rights) => { root.download-enqueue(input, parts, quality, lower, rights); }
++        form-changed(input, parts, quality, lower, rights) => { root.download-form-changed(input, parts, quality, lower, rights); }
++        pause(id) => { root.download-pause(id); }
++        resume(id) => { root.download-resume(id); }
++        cancel-job(id) => { root.download-cancel(id); }
++        import-job(id) => { root.download-import(id); }
++        remove-job(id) => { root.download-remove(id); }
++        reveal-job(id) => { root.download-reveal(id); }
++        switch-project(id) => { root.download-switch-project(id); }
++        pause-all => { root.download-pause-all(); }
++        resume-all => { root.download-resume-all(); }
++        stop-parse => { root.download-stop-parse(); }
++        check-tools => { root.download-check-tools(); }
++        reveal-tools => { root.download-reveal-tools(); }
++        choose-project(create) => { root.download-choose-project(create); }
++        filter-changed(filter, query) => { root.download-filter-changed(filter, query); }
++        save-cookie(cookie) => { root.download-save-cookie(cookie); }
++        clear-cookie => { root.download-clear-cookie(); }
+     }
+ 
+     SettingsDialog {
+--- a/src/crates/concat/ui/dialogs/downloads.slint
++++ b/src/crates/concat/ui/dialogs/downloads.slint
+@@ -0,0 +1,327 @@
++// SPDX-License-Identifier: AGPL-3.0-or-later
++// CutFlow native acquisition workspace.
++import { ScrollView } from "std-widgets.slint";
++import { Select } from "../primitives/select.slint";
++import { Theme } from "../theme/theme.slint";
++import { Glyph } from "../icons.slint";
++import { Modal, Button } from "../primitives/modal.slint";
++
++
++component Entry inherits Rectangle {
++    in-out property <string> text;
++    in property <string> placeholder;
++    in property <bool> secret;
++    callback edited();
++    callback accepted();
++    min-height: 32px; max-height: 32px;
++    horizontal-stretch: 1;
++    border-radius: 6px;
++    background: Theme.field;
++    border-width: 1px;
++    border-color: edit.has-focus ? Theme.accent : Theme.line;
++    TouchArea { clicked => { edit.focus(); } }
++    edit := TextInput {
++        x: 10px; y: (parent.height - self.preferred-height) / 2;
++        width: parent.width - 20px; height: self.preferred-height;
++        text <=> root.text; single-line: true;
++        input-type: root.secret ? InputType.password : InputType.text;
++        color: Theme.fg; font-size: 13px; font-family: Theme.font;
++        selection-background-color: Theme.accent;
++        selection-foreground-color: Theme.on-accent;
++        edited => { root.edited(); }
++        accepted => { root.accepted(); }
++    }
++    if root.text == "": Text {
++        x: 10px; y: (parent.height - self.preferred-height) / 2;
++        width: parent.width - 20px; height: self.preferred-height;
++        text: root.placeholder; color: Theme.fg-dim; font-size: 12px; overflow: elide;
++    }
++}
++component ConsentToggle inherits Rectangle {
++    in-out property <bool> checked;
++    in property <bool> enabled: true;
++    in property <string> text;
++    callback toggled();
++    min-height: 26px; max-height: 26px;
++    opacity: root.enabled ? 1 : 0.45;
++    forward-focus: keys;
++    HorizontalLayout {
++        spacing: 8px;
++        Rectangle {
++            width: 16px; height: 16px; y: 5px;
++            border-radius: 3px; border-width: 1px;
++            border-color: root.checked ? Theme.accent : Theme.line-strong;
++            background: root.checked ? Theme.accent : Theme.field;
++            Text { text: root.checked ? "✓" : ""; color: Theme.on-accent; horizontal-alignment: center; vertical-alignment: center; }
++        }
++        Text { text: root.text; color: Theme.fg-muted; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
++    }
++    TouchArea { enabled: root.enabled; clicked => { keys.focus(); root.checked = !root.checked; root.toggled(); } }
++    keys := FocusScope {
++        key-pressed(event) => {
++            if (root.enabled && event.text == Key.Space) { root.checked = !root.checked; root.toggled(); return accept; }
++            reject
++        }
++    }
++}
++
++export struct DownloadJobData {
++    id: string, title: string, status: string, detail: string,
++    target: string, hint: string, tone: int,
++    resumable: bool, stoppable: bool, cancellable: bool,
++    removable: bool, importable: bool, revealable: bool, switchable: bool,
++}
++
++export component DownloadDialog inherits Modal {
++    in property <[DownloadJobData]> jobs;
++    in property <string> message;
++    in property <int> message-tone;
++    in property <string> formats;
++    in property <string> project;
++    in property <string> stats;
++    in property <string> activity;
++    in property <string> tools;
++    in property <string> form-error;
++    in property <bool> form-valid;
++    in property <bool> available;
++    in property <bool> busy;
++    in property <bool> can-parse;
++    in property <bool> parsing;
++    in property <bool> can-pause-all;
++    in property <bool> can-resume-all;
++    in property <bool> account-set;
++    callback form-changed(string, string, int, bool, string);
++    callback parse(string);
++    callback enqueue(string, string, int, bool, string);
++    callback pause(string);
++    callback resume(string);
++    callback cancel-job(string);
++    callback import-job(string);
++    callback remove-job(string);
++    callback reveal-job(string);
++    callback switch-project(string);
++    callback pause-all();
++    callback resume-all();
++    callback stop-parse();
++    callback check-tools();
++    callback reveal-tools();
++    callback choose-project(bool);
++    callback filter-changed(int, string);
++    callback save-cookie(string);
++    callback clear-cookie();
++    property <int> confirm-kind: 0;
++    property <bool> account-expanded: false;
++    property <string> credential-text;
++    property <string> confirm-id;
++    title: "素材采集工作台";
++    note: "CutFlow";
++    glyph: Glyph.none;
++    surface-width: 1060px;
++    surface-height: 820px;
++
++    function validate() { root.form-changed(link.text, parts.text, quality.current, lower.checked, rights.text); }
++    public function focus-surface() { keys.focus(); }
++    changed confirm-kind => { if (root.open) { keys.focus(); } }
++    function submit() { if (root.form-valid) { root.enqueue(link.text, parts.text, quality.current, lower.checked, rights.text); } }
++    changed open => {
++        root.confirm-kind = 0;
++        root.account-expanded = false;
++        root.credential-text = "";
++        if (root.open) { keys.focus(); root.validate(); }
++    }
++    keys := FocusScope {
++        key-pressed(event) => {
++            if (event.text == Key.Escape) {
++                if (root.confirm-kind != 0) { root.confirm-kind = 0; } else { root.closed(); }
++                return accept;
++            }
++            if (event.text == Key.Return && event.modifiers.control && root.confirm-kind == 0) {
++                root.submit(); return accept;
++            }
++            reject
++        }
++        ScrollView {
++            VerticalLayout {
++                padding: 16px;
++                spacing: 10px;
++                HorizontalLayout {
++                    spacing: 12px;
++                    VerticalLayout {
++                        spacing: 4px;
++                        Text { text: "从视频链接，到可剪素材"; font-size: 21px; font-weight: 600; color: Theme.fg; }
++                        Text { text: root.project == "" ? "先打开剪辑工程，下载会绑定该工程。" : "当前工程 · " + root.project; color: Theme.fg-muted; wrap: word-wrap; }
++                    }
++                    Rectangle { horizontal-stretch: 1; }
++                    Button { label: "新建工程"; enabled: !root.busy; clicked => { root.choose-project(true); } }
++                    Button { label: "打开工程"; enabled: !root.busy; clicked => { root.choose-project(false); } }
++                }
++                Rectangle {
++                    min-height: 44px;
++                    background: Theme.field;
++                    border-radius: 7px;
++                    HorizontalLayout {
++                        padding: 10px; spacing: 12px;
++                        Text { text: root.stats; color: Theme.fg; vertical-alignment: center; }
++                        Rectangle { horizontal-stretch: 1; }
++                        Text { text: root.activity; color: root.busy ? Theme.accent : Theme.fg-muted; vertical-alignment: center; }
++                    }
++                }
++                Rectangle {
++                    min-height: 38px;
++                    border-radius: 6px;
++                    background: Theme.field;
++                    HorizontalLayout {
++                        padding: 10px;
++                        Text { text: root.message; color: root.message-tone == 2 ? Theme.danger : root.message-tone == 1 ? Theme.accent : Theme.fg-muted; wrap: word-wrap; }
++                    }
++                }
++                if root.confirm-kind != 0: VerticalLayout {
++                    spacing: 7px;
++                    Text { text: root.confirm-kind == 1 ? "取消此任务并保留已下载文件？" : root.confirm-kind == 2 ? "仅移除任务记录；媒体和工程引用会保留。" : "退出当前账号？本地媒体与工程会保留。"; color: Theme.fg; wrap: word-wrap; }
++                    HorizontalLayout {
++                        spacing: 8px;
++                        Button { label: "返回"; clicked => { root.confirm-kind = 0; } }
++                        Button {
++                            label: "确认"; danger: true;
++                            clicked => {
++                                if (root.confirm-kind == 1) { root.cancel-job(root.confirm-id); }
++                                if (root.confirm-kind == 2) { root.remove-job(root.confirm-id); }
++                                if (root.confirm-kind == 3) { root.clear-cookie(); }
++                                root.confirm-kind = 0;
++                            }
++                        }
++                        Rectangle { horizontal-stretch: 1; }
++                    }
++                }
++                HorizontalLayout {
++                    spacing: 18px;
++                    VerticalLayout {
++                        width: 308px;
++                        spacing: 7px;
++                        Text { text: "01   添加素材"; font-size: 15px; font-weight: 600; color: Theme.fg; }
++                        link := Entry {
++                            placeholder: "B站视频链接 / BV 号";
++                            edited => { root.validate(); }
++                            accepted => { if (root.can-parse) { root.parse(link.text); } }
++                        }
++                        HorizontalLayout {
++                            spacing: 8px;
++                            Button { label: root.parsing ? "解析中…" : "解析可用画质"; enabled: root.can-parse && link.text != ""; clicked => { root.parse(link.text); } }
++                            if root.parsing: Button { label: "取消解析"; clicked => { root.stop-parse(); } }
++                        }
++                        HorizontalLayout {
++                            spacing: 7px;
++                            parts := Entry { text: "1"; min-width: 66px; max-width: 66px; horizontal-stretch: 0; placeholder: "分 P"; edited => { root.validate(); } }
++                            quality := Select {
++                                options: ["4K · qn120", "1080p · qn80", "账号可用最佳"];
++                                current: 0; horizontal-stretch: 1;
++                                changed(index) => { if (index == 2) { lower.checked = false; } root.validate(); }
++                            }
++                        }
++                        lower := ConsentToggle {
++                            text: "目标画质不可用时允许降档"; checked: false;
++                            enabled: quality.current != 2;
++                            toggled => { root.validate(); }
++                        }
++                        Text {
++                            text: quality.current == 0 && !lower.checked
++                                ? "严格 UHD：下载后校验像素，不满足则拒绝入库。"
++                                : "入库后显示实际规格，账号权限不足时停止。";
++                            color: Theme.fg-muted; wrap: word-wrap; font-size: 11px;
++                        }
++                        rights := Entry { placeholder: "用途或授权备注（必填）"; edited => { root.validate(); } }
++                        Text { text: root.form-error; color: Theme.fg-muted; wrap: word-wrap; font-size: 11px; }
++                        Button { label: "加入下载队列"; primary: true; large: true; block: true; enabled: root.form-valid; clicked => { root.submit(); } }
++                        Text { text: "Ctrl + Enter 加入队列 · 素材需有使用授权"; color: Theme.fg-muted; wrap: word-wrap; font-size: 11px; }
++                        Rectangle { height: 1px; background: Theme.line; }
++                        Text { text: "可用画质"; color: Theme.fg; font-weight: 600; }
++                        ScrollView {
++                            height: 58px;
++                            Text { text: root.formats == "" ? "解析后显示当前账号可访问的画质档位。" : root.formats; color: Theme.fg-muted; wrap: word-wrap; }
++                        }
++                    }
++                    Rectangle { width: 1px; background: Theme.line; }
++                    VerticalLayout {
++                        horizontal-stretch: 1;
++                        spacing: 9px;
++                        HorizontalLayout {
++                            spacing: 6px;
++                            Text { text: "02   下载与入库"; font-size: 15px; font-weight: 600; color: Theme.fg; vertical-alignment: center; }
++                            Rectangle { horizontal-stretch: 1; }
++                            Button { label: "全部暂停"; enabled: root.can-pause-all; clicked => { root.pause-all(); } }
++                            Button { label: "继续队列"; enabled: root.can-resume-all; clicked => { root.resume-all(); } }
++                        }
++                        HorizontalLayout {
++                            spacing: 8px;
++                            filter := Select { max-width: 170px; options: ["全部任务", "进行中", "待入库", "已完成 / 取消", "失败 / 暂停"]; changed(index) => { root.filter-changed(self.current, search.text); } }
++                            search := Entry { placeholder: "搜索链接、分 P 或工程"; horizontal-stretch: 1; edited => { root.filter-changed(filter.current, self.text); } }
++                        }
++                        ScrollView {
++                            min-height: 298px;
++                            vertical-stretch: 1;
++                            VerticalLayout {
++                                spacing: 8px;
++                                if root.jobs.length == 0: Rectangle {
++                                    min-height: 145px;
++                                    background: Theme.field;
++                                    border-radius: 8px;
++                                    VerticalLayout {
++                                        padding: 20px; spacing: 10px; alignment: center;
++                                        Text { text: "这里会显示你的素材任务"; color: Theme.fg; horizontal-alignment: center; }
++                                        Text { text: "从左侧添加素材，或调整筛选条件。\n下载完成并校验后，素材进入绑定工程。"; color: Theme.fg-muted; wrap: word-wrap; horizontal-alignment: center; }
++                                    }
++                                }
++                                for job in root.jobs: Rectangle {
++                                    min-height: 145px;
++                                    border-radius: 8px;
++                                    border-width: 1px;
++                                    border-color: job.tone == 1 ? Theme.accent : Theme.line;
++                                    background: Theme.field;
++                                    VerticalLayout {
++                                        padding: 11px; spacing: 6px;
++                                        HorizontalLayout {
++                                            spacing: 10px;
++                                            Text { text: job.title; color: Theme.fg; overflow: elide; horizontal-stretch: 1; font-weight: 600; }
++                                            Text { text: job.status; color: job.tone == 2 ? Theme.danger : job.tone == 1 ? Theme.accent : Theme.fg-muted; }
++                                        }
++                                        Text { text: job.detail; color: Theme.fg-muted; wrap: word-wrap; font-size: 11px; }
++                                        Text { text: "工程 · " + job.target; color: Theme.fg-muted; overflow: elide; font-size: 11px; }
++                                        if job.hint != "": Text { text: job.hint; color: job.tone == 2 ? Theme.danger : Theme.fg-muted; wrap: word-wrap; font-size: 11px; }
++                                        HorizontalLayout {
++                                            spacing: 5px;
++                                            if job.stoppable: Button { label: "暂停"; enabled: root.available; clicked => { root.pause(job.id); } }
++                                            if job.resumable: Button { label: job.status == "已取消" ? "重新排队" : "继续 / 重试"; enabled: root.available; clicked => { root.resume(job.id); } }
++                                            if job.importable: Button { label: "导入素材"; primary: true; enabled: root.available && !root.busy; clicked => { root.import-job(job.id); } }
++                                            if job.switchable: Button { label: "切换到工程"; enabled: !root.busy; clicked => { root.switch-project(job.id); } }
++                                            if job.revealable: Button { label: "文件夹"; clicked => { root.reveal-job(job.id); } }
++                                            if job.cancellable: Button { label: "取消"; enabled: root.available; clicked => { root.confirm-id = job.id; root.confirm-kind = 1; } }
++                                            if job.removable: Button { label: "移除记录"; enabled: root.available; clicked => { root.confirm-id = job.id; root.confirm-kind = 2; } }
++                                            Rectangle { horizontal-stretch: 1; }
++                                        }
++                                    }
++                                }
++                            }
++                        }
++                    }
++                }
++
++
++                if root.account-expanded: HorizontalLayout {
++                    spacing: 10px;
++                    Text { text: root.account-set ? "账号凭据 · 已加密保存" : "账号凭据 · 未设置"; color: Theme.fg-muted; vertical-alignment: center; }
++                    Entry { text <=> root.credential-text; placeholder: "自己的完整 Cookie（含 SESSDATA）"; secret: true; horizontal-stretch: 1; }
++                    Button { label: "保存凭据"; enabled: root.available && !root.busy && root.credential-text != ""; clicked => { root.save-cookie(root.credential-text); root.credential-text = ""; } }
++                    Button { label: "退出账号"; enabled: root.available && !root.busy && root.account-set; clicked => { root.credential-text = ""; root.confirm-kind = 3; } }
++                }
++                HorizontalLayout {
++                    spacing: 8px;
++                    Text { text: root.tools; color: Theme.fg-muted; wrap: word-wrap; horizontal-stretch: 1; font-size: 11px; }
++                    Button { label: root.account-expanded ? "收起账号" : root.account-set ? "账号 · 已设置" : "设置账号"; clicked => { root.account-expanded = !root.account-expanded; root.credential-text = ""; } }
++                    Button { label: "检查组件"; enabled: !root.busy; clicked => { root.check-tools(); } }
++                    Button { label: "组件目录"; clicked => { root.reveal-tools(); } }
++                    Button { label: "返回剪辑"; clicked => { root.closed(); } }
++                }
++            }
++        }
++    }
++}
+--- a/src/crates/concat/ui/title-bar.slint
++++ b/src/crates/concat/ui/title-bar.slint
+@@ -145,6 +145,7 @@
+     in property <int> keyboard-menu: -1;
+     in property <int> keyboard-token;
+     callback open-settings();
++    callback open-downloads();
+     /// A view was picked from the add-panel list.
+     callback add-pane(kind: PaneKind);
+     callback export-clicked();
+@@ -248,6 +249,11 @@
+ 
+         Rectangle { horizontal-stretch: 1; }
+ 
++        if !root.minimal: MenuLabel {
++            label: "B站素材";
++            clicked => { root.open-downloads(); }
++        }
++
+         // Beside Settings, because it is the same sort of thing: neither one
+         // is about the project, both are about the window you are looking at
+         // it through. A seat's own corner button changes or closes that seat;

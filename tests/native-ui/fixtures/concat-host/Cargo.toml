@@ -1,0 +1,6 @@
+[package]
+name = "concat-host"
+version = "0.0.0"
+edition = "2024"
+[dependencies]
+concat-project = { path = "../concat-project" }

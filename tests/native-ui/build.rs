@@ -1,0 +1,54 @@
+fn main() {
+    let compile = |path| {
+        let config = slint_build::CompilerConfiguration::new()
+            .embed_resources(slint_build::EmbedResourcesKind::EmbedFiles);
+        slint_build::compile_with_config(path, config).unwrap();
+    };
+    let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    let font_import = std::env::var("CUTFLOW_UI_FONT")
+        .ok()
+        .map(|font| format!("import {:?};\n", font))
+        .unwrap_or_default();
+    let mut preview = std::fs::read_to_string("ui.slint").unwrap();
+    for file in ["dialogs/downloads.slint", "theme/theme.slint"] {
+        let relative = format!("../../editor/src/crates/concat/ui/{file}");
+        let absolute = std::path::PathBuf::from(&relative).canonicalize().unwrap();
+        preview = preview.replace(
+            &format!("\"{relative}\""),
+            &format!("{:?}", absolute.to_string_lossy()),
+        );
+    }
+    let preview_file = out_dir.join("ui.slint");
+    std::fs::write(&preview_file, format!("{font_import}{preview}")).unwrap();
+    compile(preview_file);
+    println!("cargo:rerun-if-env-changed=CUTFLOW_UI_FONT");
+    println!("cargo:rerun-if-changed=ui.slint");
+    // Reuse production callback/property declarations and its exact DownloadDialog wiring.
+    let source = std::fs::read_to_string("../../editor/src/crates/concat/ui/app.slint").unwrap();
+    let start = source
+        .find("    in-out property <bool> download-opened;")
+        .unwrap();
+    let end = source[start..].find("    // ── the launch screen").unwrap() + start;
+    let props = &source[start..end];
+    let start = source
+        .find("    download-sheet := DownloadDialog {")
+        .unwrap();
+    let end = source[start..].find("    SettingsDialog {").unwrap() + start;
+    let dialog = &source[start..end];
+    let dialog_file =
+        std::path::PathBuf::from("../../editor/src/crates/concat/ui/dialogs/downloads.slint")
+            .canonicalize()
+            .unwrap();
+    let theme = std::path::PathBuf::from("../../editor/src/crates/concat/ui/theme/theme.slint")
+        .canonicalize()
+        .unwrap();
+    let text = format!(
+        "{font_import}import {{DownloadDialog,DownloadJobData}} from {:?};\nimport {{Theme}} from {:?};\nexport {{DownloadJobData,Theme}}\nexport component App inherits Window {{width:1120px;height:900px; callback start-compose(); callback start-open();\n{props}\n{dialog}\n}}",
+        dialog_file.to_string_lossy(),
+        theme.to_string_lossy()
+    );
+    let out = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("bridge.slint");
+    std::fs::write(&out, text).unwrap();
+    compile(out);
+    println!("cargo:rerun-if-changed=../../editor/src/crates/concat/ui/app.slint");
+}

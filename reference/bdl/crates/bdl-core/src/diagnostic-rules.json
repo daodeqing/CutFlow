@@ -1,0 +1,293 @@
+[
+  {
+    "code": "file_in_use",
+    "summary": "文件被占用",
+    "detail": "文件正在被其他程序使用。关闭正在使用该文件的程序后重试。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "文件被占用",
+      "sharing violation",
+      "being used by another process",
+      "另一个程序正在使用",
+      "另一个进程正在使用"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "file_read_only",
+    "summary": "文件为只读",
+    "detail": "文件或文件系统为只读，请检查文件属性和保存位置后重试。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "文件为只读",
+      "read-only file system",
+      "readonly",
+      "只读文件"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "file_access_denied",
+    "summary": "本地文件访问被拒绝",
+    "detail": "无法访问本地文件。请查看日志中的操作和路径，检查文件或目录权限；能写入文件不代表有权删除。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "permission denied",
+      "access is denied",
+      "拒绝访问",
+      "保存目录不可写",
+      "没有删除权限",
+      "无删除权限"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "file_path_unsafe",
+    "summary": "文件路径未通过安全检查",
+    "detail": "路径包含目录联接、符号链接，或不属于任务记录的文件范围。请核对报错路径，在文件管理器中处理。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "拒绝清理符号链接或目录联接",
+      "拒绝清理包含上级目录",
+      "拒绝自动清理",
+      "只允许清理普通文件"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "storage_unavailable",
+    "summary": "保存位置不可访问",
+    "detail": "请确认磁盘、网络共享或外部目录可访问；Android 外部目录可能需要重新选择授权。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "输出磁盘或共享目录不可访问",
+      "目录授权已失效",
+      "目录授权失效",
+      "找不到网络路径",
+      "device is not ready",
+      "no such device"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "disk_full",
+    "summary": "磁盘空间不足",
+    "detail": "请释放保存位置的空间或更换下载目录后重试。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "no space left",
+      "disk full",
+      "磁盘空间不足",
+      "磁盘已满"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "task_still_running",
+    "summary": "任务尚未停止",
+    "detail": "任务仍在停止或导出，请稍后重新预览并删除。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "任务仍在停止或导出",
+      "任务仍在执行"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "file_changed",
+    "summary": "文件已变化",
+    "detail": "文件或删除确认已变化，请重新查看文件列表后确认。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "文件已变化",
+      "清理确认已失效",
+      "清理确认已过期"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "media_url_expired",
+    "summary": "链接可能已过期",
+    "detail": "下载地址可能已过期或资源已移除，请刷新链接后重试。",
+    "recommended_action": "refresh_urls_and_retry",
+    "contains": [
+      "链接已过期",
+      "url expired",
+      "signature expired"
+    ],
+    "http_statuses": [
+      404,
+      410
+    ]
+  },
+  {
+    "code": "resource_permission_required",
+    "summary": "清晰度或付费内容权限不足",
+    "detail": "请确认当前账号能在 B 站播放同一内容及清晰度，再重新解析；也可以选择有权访问的清晰度。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "需要大会员",
+      "需要 vip",
+      "需要vip",
+      "vip 权限",
+      "vip权限",
+      "会员权限",
+      "只能试看",
+      "已购买该课程",
+      "付费权限"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "private_resource",
+    "summary": "资源不可访问",
+    "detail": "资源可能为私密、已失效或当前账号无权访问，请在 B 站来源页面确认。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "private resource",
+      "私密",
+      "稿件不可见",
+      "无权访问",
+      "访问受限"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "login_required",
+    "summary": "登录状态失效",
+    "detail": "请求缺少有效登录凭据，请重新登录后重试。",
+    "recommended_action": "login_then_retry",
+    "contains": [
+      "[-101]",
+      "code=-101",
+      "未登录",
+      "cookie 已失效",
+      "cookie已失效",
+      "cookie expired",
+      "登录状态可能已失效",
+      "登录已失效",
+      "unauthorized",
+      "not logged in"
+    ],
+    "http_statuses": [
+      401
+    ]
+  },
+  {
+    "code": "source_rate_limited",
+    "summary": "请求过于频繁",
+    "detail": "源站限制了请求频率。请暂停批量任务，稍后降低任务并发和分段数再试；如日志有等待时间，请按该时间重试。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "[-509]",
+      "[-799]",
+      "code=-509",
+      "code=-799",
+      "too many requests",
+      "请求过于频繁",
+      "限流"
+    ],
+    "http_statuses": [
+      429
+    ]
+  },
+  {
+    "code": "source_verification_required",
+    "summary": "源站要求验证",
+    "detail": "请求可能触发源站验证或访问限制。请暂停批量任务，在 B 站网页检查验证提示，稍后重试。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "[-352]",
+      "[-412]",
+      "code=-352",
+      "code=-412",
+      "captcha",
+      "风控",
+      "源站限制了请求",
+      "html verification required"
+    ],
+    "http_statuses": [
+      412
+    ]
+  },
+  {
+    "code": "remote_forbidden",
+    "summary": "源站拒绝访问",
+    "detail": "源站拒绝了请求，单凭 403 无法判断登录、资源权限或访问限制。请查看原始日志，并在 B 站确认来源内容可播放。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "forbidden"
+    ],
+    "http_statuses": [
+      403
+    ]
+  },
+  {
+    "code": "source_access_restricted",
+    "summary": "源站访问受限",
+    "detail": "源站限制了访问，请查看原始日志中的状态码及等待时间，稍后手动重试。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "source restriction",
+      "shared http budget"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "missing_ffmpeg",
+    "summary": "未找到 FFmpeg",
+    "detail": "未检测到可用的 FFmpeg，请在设置中配置后重试。",
+    "recommended_action": "configure_ffmpeg",
+    "contains": [
+      "ffmpeg not found",
+      "ffmpeg-not-found",
+      "未找到 ffmpeg"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "mux_failed",
+    "summary": "合并失败",
+    "detail": "媒体后处理失败，请查看原始日志中的 FFmpeg 输出和文件路径。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "ffmpeg",
+      "mux",
+      "合并"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "network_timeout",
+    "summary": "网络超时",
+    "detail": "请求未在限定时间内完成，请检查网络后重试。",
+    "recommended_action": "retry",
+    "contains": [
+      "timeout",
+      "timed out",
+      "超时"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "response_body_failed",
+    "summary": "下载响应读取失败",
+    "detail": "下载连接已建立，但读取响应数据失败，尚未完成该轨道。请尝试单独重试此任务，或将分段数设为 1 后重试；原始日志可区分响应中断和解压异常。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [
+      "error decoding response body",
+      "读取分段响应失败",
+      "读取响应失败",
+      "读取压缩响应失败"
+    ],
+    "http_statuses": []
+  },
+  {
+    "code": "download_failed",
+    "summary": "所有下载地址均失败",
+    "detail": "可用下载地址均未成功，请查看原始日志中各下载源的最后错误。",
+    "recommended_action": "inspect_raw_log",
+    "contains": [],
+    "http_statuses": []
+  }
+]

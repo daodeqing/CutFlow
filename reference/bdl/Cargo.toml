@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+exclude = ["vendor/bpi-rs"]
+members = [
+  "crates/bdl-core",
+  "crates/bdl-tauri",
+  "crates/bdl-mobile-credentials",
+  "crates/bdl-mobile-execution",
+  "crates/bdl-mobile-media",
+  "crates/bdl-mobile-storage",
+  "crates/bdl-cli",
+  "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+authors = ["YUELI <yuelioi1210@gmail.com>"]
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+bpi-rs = { version = "0.3.0", default-features = false, features = ["bangumi", "cheese", "danmaku", "fav", "login", "user", "video"] }
+bytes = "1"
+chrono = { version = "0.4", features = ["clock", "serde"] }
+futures = "0.3"
+flate2 = "1"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "cookies", "gzip", "deflate", "brotli"] }
+rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "process", "sync", "time", "io-util"] }
+tracing = "0.1"
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+fs2 = "0.4"
+
+[patch.crates-io]
+bpi-rs = { path = "vendor/bpi-rs" }

@@ -1,0 +1,51 @@
+import { DownloadDialog, DownloadJobData } from "../../editor/src/crates/concat/ui/dialogs/downloads.slint";
+import { Theme } from "../../editor/src/crates/concat/ui/theme/theme.slint";
+export { DownloadJobData, Theme }
+export component Preview inherits Window {
+    preferred-width: 1120px; preferred-height: 900px;
+    min-width: 900px; min-height: 560px;
+    background: Theme.page;
+    default-font-family: "Noto Sans CJK SC";
+    default-font-size: 13px;
+    in-out property <bool> opened: true;
+    in property <[DownloadJobData]> jobs;
+    in-out property <bool> valid;
+    callback enqueued(string,string,int,bool,string);
+    callback parsed(string);
+    callback changed(string,string,int,bool,string);
+    callback removed(string);
+    callback cancelled(string);
+    callback paused(string);
+    callback resumed(string);
+    callback imported(string);
+    callback all-paused();
+    callback all-resumed();
+    public function focus-dialog() { sheet.focus-surface(); }
+    sheet := DownloadDialog {
+        width: 100%; height: 100%;
+        open: root.opened;
+        jobs: root.jobs;
+        project: "城市光影 · 4K30";
+        stats: "3 个任务   ·   1 等待   1 待入库   1 完成";
+        activity: "本地剪辑可继续";
+        available: true; can-parse: true;
+        can-pause-all: true; can-resume-all: true;
+        form-valid: root.valid;
+        form-error: root.valid ? "" : "粘贴视频链接，再填写分 P 和用途备注。";
+        message: "下载校验完成，素材已保存到绑定工程。";
+        message-tone: 1;
+        tools: "bdl / ffmpeg / ffprobe · 已就绪";
+        formats: "城市光影\nP1 · 城市夜景 · qn120/hevc、qn80/avc";
+        closed => { root.opened = false; }
+        form-changed(a,b,c,d,e) => { root.changed(a,b,c,d,e); }
+        enqueue(a,b,c,d,e) => { root.enqueued(a,b,c,d,e); }
+        parse(a) => { root.parsed(a); }
+        pause(id) => { root.paused(id); }
+        resume(id) => { root.resumed(id); }
+        cancel-job(id) => { root.cancelled(id); }
+        remove-job(id) => { root.removed(id); }
+        import-job(id) => { root.imported(id); }
+        pause-all => { root.all-paused(); }
+        resume-all => { root.all-resumed(); }
+    }
+}

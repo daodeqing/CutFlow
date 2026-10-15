@@ -1,0 +1,340 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  cli:
+    name: Build standalone CLI
+    uses: ./.github/workflows/cli.yml
+    permissions:
+      contents: read
+
+  build:
+    name: Build ${{ matrix.name }} release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            platform: windows-latest
+            target: ""
+            args: ""
+          - name: macOS Apple Silicon
+            platform: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          - name: macOS Intel
+            platform: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+          - name: Linux x64
+            platform: ubuntu-22.04
+            target: ""
+            args: --bundles appimage,deb
+
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify release tag matches app version
+        run: node ./scripts/verify-release-tag.mjs "${{ github.ref_name }}"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.88
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - name: Install frontend dependencies
+        run: pnpm --dir apps/desktop install --frozen-lockfile
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: bash scripts/install-linux-deps.sh
+
+      - name: Cache Windows installer tools
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/tauri/NSIS
+          key: windows-nsis-3.11-tauri-utils-0.5.3
+
+      - name: Test Windows installer dependency retries
+        if: runner.os == 'Windows'
+        run: python scripts/test_prepare_windows_nsis.py
+
+      - name: Prepare Windows installer dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python scripts/prepare-windows-nsis.py --tools-dir "$env:LOCALAPPDATA/tauri"
+
+      - name: Build and stage release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: BDL v__VERSION__
+          releaseBody: |
+            下载适用于 Windows、macOS 或 Linux x86_64 的桌面安装包；若本 Release 附带 Android ARM64 APK，则该 APK 为使用项目固定 keystore 签名的 Android 开发预览包。
+            Linux 首批提供 AppImage 与 deb，以 Ubuntu 22.04 为构建基线；安装与 FFmpeg 配置见 README。
+            macOS 安装包使用 ad-hoc 签名，未经 Apple Developer ID 签名与公证；首次打开请按 README 指引操作。
+            Android 已内置 FFmpeg，无需配置桌面 FFmpeg 路径；若本 Release 没有 Android APK，则表示该版本没有可公开分发的正式 Android 签名包。
+            应用内更新包使用项目的 Tauri 签名验证完整性。
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Verify Windows GUI subsystem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/verify-windows-gui.ps1 ./target/release/bdl-desktop.exe
+
+      - name: Verify Linux package contents
+        if: runner.os == 'Linux'
+        run: bash scripts/verify-linux-packages.sh ./target/release/bundle
+
+      - name: Verify AppImage starts as an ordinary user
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dbus-run-session -- bash scripts/smoke-linux-appimage.sh ./target/release/bundle/appimage/*.AppImage
+
+      - name: Verify macOS ad-hoc signature
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="./target/${{ matrix.target }}/release/bundle/macos/BDL.app"
+          codesign --verify --deep --strict "$app_path"
+          signature_details="$(codesign -dv --verbose=4 "$app_path" 2>&1)"
+          printf '%s\n' "$signature_details"
+          if [[ "$signature_details" != *"Signature=adhoc"* ]]; then
+            echo "Expected an ad-hoc macOS signature." >&2
+            exit 1
+          fi
+
+  android:
+    name: Build Android ARM64 release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify release tag matches app version
+        run: node ./scripts/verify-release-tag.mjs "${{ github.ref_name }}"
+
+      - name: Detect Android release signing
+        id: signing
+        shell: bash
+        run: |
+          if [[ -n "$ANDROID_KEY_BASE64" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Android release assets skipped because ANDROID_KEY_BASE64, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD are not all configured."
+          fi
+
+      - name: Install pnpm
+        if: steps.signing.outputs.enabled == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - name: Install Node.js
+        if: steps.signing.outputs.enabled == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Install Rust Android target
+        if: steps.signing.outputs.enabled == 'true'
+        uses: dtolnay/rust-toolchain@1.88
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install Java
+        if: steps.signing.outputs.enabled == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        if: steps.signing.outputs.enabled == 'true'
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android platform and NDK
+        if: steps.signing.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Install frontend dependencies
+        if: steps.signing.outputs.enabled == 'true'
+        run: pnpm --dir apps/desktop install --frozen-lockfile
+
+      - name: Build signed Android release
+        if: steps.signing.outputs.enabled == 'true'
+        run: node ./scripts/package-android-release.mjs
+
+      - name: Upload Android release assets
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release upload "${{ github.ref_name }}" dist/android/* --clobber
+
+  publish:
+    name: Publish staged release
+    needs: [build, android, cli]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CLI packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bdl-cli-*
+          path: dist/cli
+          merge-multiple: true
+
+      - name: Attach CLI packages to staged release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd dist/cli
+          sha256sum --check *.sha256
+          gh release upload "${{ github.ref_name }}" ./* --clobber --repo "${{ github.repository }}"
+
+      - name: Normalize updater download URLs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/updater
+          release_id="$(gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "${{ github.ref_name }}") | .id')"
+          test -n "$release_id"
+          gh api "repos/${{ github.repository }}/releases/${release_id}/assets?per_page=100" \
+            > dist/updater/assets.json
+          manifest_id="$(jq -r '.[] | select(.name == "latest.json") | .id' dist/updater/assets.json)"
+          test -n "$manifest_id"
+          gh api -H 'Accept: application/octet-stream' \
+            "repos/${{ github.repository }}/releases/assets/${manifest_id}" \
+            > dist/updater/latest.json
+          node scripts/normalize-updater-manifest.mjs \
+            dist/updater/latest.json \
+            dist/updater/assets.json \
+            "${{ github.ref_name }}"
+          gh release upload "${{ github.ref_name }}" \
+            dist/updater/latest.json \
+            --clobber \
+            --repo "${{ github.repository }}"
+
+      - name: Publish GitHub release
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('node:fs');
+            const tag = context.ref.replace('refs/tags/', '');
+            const releases = await github.paginate(
+              github.rest.repos.listReleases,
+              { ...context.repo, per_page: 100 },
+            );
+            const release = releases.find(({ tag_name }) => tag_name === tag);
+            if (!release) {
+              throw new Error(`Draft release for ${tag} was not found.`);
+            }
+            const notesPath = `docs/releases/${tag}.md`;
+            const notes = fs.existsSync(notesPath) ? fs.readFileSync(notesPath, 'utf8') : '';
+            // Linux packages must never consume another installer's fallback URL.
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              ...context.repo, release_id: release.id, per_page: 100,
+            });
+            const manifestAsset = assets.find(({ name }) => name === 'latest.json');
+            for (const [platform, extension] of [
+              ['windows-x64', 'zip'], ['linux-x64', 'tar.gz'],
+              ['macos-arm64', 'tar.gz'], ['macos-x64', 'tar.gz'],
+            ]) {
+              const name = `bdl-cli-${tag.slice(1)}-${platform}.${extension}`;
+              for (const required of [name, `${name}.sha256`]) {
+                if (!assets.some(asset => asset.name === required && asset.size > 0)) {
+                  throw new Error(`Missing CLI release asset ${required}`);
+                }
+              }
+            }
+            if (!manifestAsset) throw new Error('Signed updater manifest is missing.');
+            const response = await github.rest.repos.getReleaseAsset({
+              ...context.repo, asset_id: manifestAsset.id,
+              headers: { accept: 'application/octet-stream' },
+            });
+            const manifest = JSON.parse(typeof response.data === 'string'
+              ? response.data : Buffer.from(response.data).toString('utf8'));
+            for (const [format, extension] of [['appimage', '.AppImage'], ['deb', '.deb']]) {
+              const target = `linux-x86_64-${format}`;
+              const entry = manifest.platforms?.[target];
+              if (!entry?.signature || !entry?.url) throw new Error(`Missing signed updater target ${target}`);
+              const artifact = assets.find((asset) =>
+                entry.url === `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/download/${tag}/${asset.name}`);
+              if (!artifact?.name.endsWith(extension)) {
+                throw new Error(`Updater target ${target} does not point to its uploaded ${extension} package.`);
+              }
+            }
+            const published = await github.rest.repos.updateRelease({
+              ...context.repo,
+              release_id: release.id,
+              body: notes ? `${notes}\n\n${release.body || ''}` : release.body,
+              draft: false,
+              prerelease: false,
+              make_latest: 'true',
+            });
+            core.info(`Published ${published.data.tag_name} as the latest release.`);

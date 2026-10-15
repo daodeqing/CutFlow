@@ -1,0 +1,14 @@
+{
+  "editor_modified_or_added": [
+    "assets/icons/cutflow.ico",
+    "assets/icons/cutflow_256.png",
+    "src/Cargo.lock",
+    "src/crates/concat/Cargo.toml",
+    "src/crates/concat/build.rs",
+    "src/crates/concat/src/downloads.rs",
+    "src/crates/concat/src/lib.rs",
+    "src/crates/concat/ui/app.slint",
+    "src/crates/concat/ui/dialogs/downloads.slint",
+    "src/crates/concat/ui/title-bar.slint"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "concat": {
+    "url": "https://github.com/jub0t/concat",
+    "commit": "cda4abcaeb1c788b51de6929e9cac517a7f0f501"
+  },
+  "bdl": {
+    "url": "https://github.com/Yuelioi/bdl",
+    "commit": "d056ee31bac591af3a5e536eddaa44b4d352e3f1"
+  }
+}

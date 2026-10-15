@@ -1,0 +1,71 @@
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors and local workspace state
+.vscode/
+.idea/
+.worktrees/
+*.swp
+*.swo
+
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+.vite/
+.eslintcache
+*.tsbuildinfo
+apps/desktop/auto-imports.d.ts
+apps/desktop/components.d.ts
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Tauri / build outputs
+src-tauri/target/
+apps/**/src-tauri/target/
+apps/**/src-tauri/gen/
+apps/**/dist/
+crates/**/android/.tauri/
+crates/**/android/build/
+apps/desktop/playwright-report/
+apps/desktop/test-results/
+
+# Local app runtime data
+.bdl/
+apps/**/src-tauri/downloads/
+*.bdlpart
+*.part
+*.tmp
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+/downloads/
+/output/
+/logs/
+.bdl-run
+
+# Local promo/video production workspace
+/promo/
+
+# Local work notes and handoffs
+/flightdeck/
+/.task/
+
+# Local Distribution publishing tools and configuration
+/local-release/
+
+# Local support scripts, QR sessions and login credentials
+/local-test/

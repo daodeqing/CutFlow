@@ -1,0 +1,26 @@
+[package]
+name = "cutflow-native-ui-check"
+version = "0.2.0"
+edition = "2024"
+
+[dependencies]
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "renderer-software"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[build-dependencies]
+slint-build = "=1.18.1"
+
+[dependencies.cutflow-download]
+path = "../../downloader"
+[dependencies.concat-host]
+path = "fixtures/concat-host"
+[dependencies.concat-project]
+path = "fixtures/concat-project"
+[dependencies.opener]
+version = "0.8"
+[dependencies.serde_json]
+version = "1"
+
+[dependencies.i-slint-core]
+version = "=1.18.1"
+features = ["image-decoders", "svg"]

@@ -1,0 +1,420 @@
+use std::sync::Arc;
+
+use bdl_core::fetcher::{BandwidthLimiter, FetchCancelToken, FetchConfig, ReqwestFetcher};
+use bdl_core::queue::{DownloadTask, QueueLogLevel, TaskStatus};
+use futures::stream::{FuturesUnordered, StreamExt};
+use tauri::{AppHandle, Manager};
+
+use crate::commands::{
+    CommandResult, DownloadRuntimeOptions, concurrent_tasks, emit_queue_log,
+    queue_task_launch_context, run_download_task,
+};
+use crate::events;
+use crate::state::{AppState, SettingsSnapshot};
+use crate::task_failure::{is_expired_url_error, recent_auto_refresh_attempt_count};
+
+const MAX_AUTO_REFRESH_ATTEMPTS: usize = 3;
+
+pub(crate) fn start(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        state.notify_queue_changed();
+        if !state.try_start_queue_worker() {
+            return;
+        }
+
+        let result = run(&app, state.inner()).await;
+        if let Err(error) = state.task_execution().set_active(false) {
+            tracing::warn!("failed to stop platform task execution: {error}");
+        }
+        state.finish_queue_worker();
+
+        if let Err(error) = result {
+            tracing::error!("queue worker failed: {}", error.diagnostic_message());
+        }
+
+        let should_restart = matches!(state.has_startable_task(), Ok(true))
+            || matches!(state.next_scheduled_at(), Ok(Some(_)));
+        if should_restart {
+            start(&app);
+        }
+    });
+}
+
+async fn run(app: &AppHandle, state: &AppState) -> CommandResult<()> {
+    let global_limiter = state.global_limiter();
+    let mut running = FuturesUnordered::new();
+    let mut execution_active = false;
+
+    let result = async {
+        loop {
+            let current_settings = state.settings()?;
+            let concurrent_tasks = concurrent_tasks(&current_settings);
+            while running.len() < concurrent_tasks {
+                let Some(task) = state.take_next_startable_task()? else {
+                    break;
+                };
+                let attempt = AttemptGuard {
+                    state,
+                    task_id: task.id.clone(),
+                };
+                if !execution_active {
+                    match state.task_execution().set_active(true) {
+                        Ok(()) => execution_active = true,
+                        Err(error) => {
+                            tracing::warn!("failed to activate platform task execution: {error}");
+                        }
+                    }
+                }
+                let launch =
+                    queue_task_launch_context(state.settings()?, task.speed_limit_bytes_per_second);
+
+                events::emit(app, events::QUEUE_TASK_UPDATED, &task)?;
+                emit_queue_log(app, state, &task.id, QueueLogLevel::Info, "开始下载任务")?;
+                running.push(run_download_attempt(
+                    app,
+                    state,
+                    global_limiter.clone(),
+                    launch.fetch_config,
+                    (task, attempt),
+                    launch.runtime_options,
+                    launch.settings,
+                ));
+            }
+
+            let scheduled_wakeups = state.scheduled_wakeups()?;
+            let next_scheduled_at = scheduled_wakeups.first().copied();
+            let scheduled_wakeup_millis = scheduled_wakeups
+                .iter()
+                .map(|scheduled_at| scheduled_at.timestamp_millis())
+                .collect::<Vec<_>>();
+            if let Err(error) = state
+                .task_execution()
+                .sync_scheduled_wakeups(&scheduled_wakeup_millis)
+            {
+                tracing::warn!("failed to sync platform scheduled wakeups: {error}");
+            }
+
+            if running.is_empty() {
+                if execution_active {
+                    if let Err(error) = state.task_execution().set_active(false) {
+                        tracing::warn!("failed to stop platform task execution: {error}");
+                    } else {
+                        execution_active = false;
+                    }
+                }
+                let Some(scheduled_at) = next_scheduled_at else {
+                    break;
+                };
+                wait_for_schedule_or_queue_change(state, scheduled_at).await;
+                continue;
+            }
+
+            let completed = if let Some(scheduled_at) = next_scheduled_at {
+                tokio::select! {
+                    completed = running.next() => completed,
+                    () = wait_for_schedule_or_queue_change(state, scheduled_at) => None,
+                }
+            } else {
+                tokio::select! {
+                    completed = running.next() => completed,
+                    () = state.wait_for_queue_change() => None,
+                }
+            };
+
+            if let Some(outcome) = completed {
+                outcome?;
+            }
+        }
+
+        Ok(())
+    }
+    .await;
+    if result.is_err() {
+        // Native exports and muxers may keep writing after their awaiter is
+        // dropped. Stop new pickups, then drain all attempts before exit.
+        if let Ok(tasks) = state.queue_snapshot() {
+            for task in tasks {
+                if matches!(state.cancel_running_task(&task.id), Ok(true))
+                    || task.status == TaskStatus::Downloading
+                {
+                    let _ = state.update_task_status(&task.id, TaskStatus::Paused);
+                }
+            }
+        }
+        while running.next().await.is_some() {}
+    }
+    result
+}
+
+async fn wait_for_schedule_or_queue_change(
+    state: &AppState,
+    scheduled_at: chrono::DateTime<chrono::Utc>,
+) {
+    let delay = (scheduled_at - chrono::Utc::now())
+        .to_std()
+        .unwrap_or(std::time::Duration::ZERO);
+    tokio::select! {
+        () = tokio::time::sleep(delay) => {}
+        () = state.wait_for_queue_change() => {}
+    }
+}
+
+async fn run_download_attempt(
+    app: &AppHandle,
+    state: &AppState,
+    global_limiter: Arc<BandwidthLimiter>,
+    fetch_config: FetchConfig,
+    picked: (DownloadTask, AttemptGuard<'_>),
+    runtime_options: DownloadRuntimeOptions,
+    settings: SettingsSnapshot,
+) -> CommandResult<()> {
+    let (task, _attempt) = picked;
+    let cancel_token = state.register_task_cancel_token(&task.id)?;
+    // Pause/remove can arrive after pickup, before this future is first polled.
+    if !matches!(state.task_status(&task.id), Ok(TaskStatus::Downloading)) {
+        return Ok(());
+    }
+    let outcome = match ReqwestFetcher::with_global_limiter(fetch_config, global_limiter) {
+        Ok(fetcher) => {
+            run_download_task(
+                app,
+                state,
+                &fetcher,
+                task.clone(),
+                runtime_options,
+                cancel_token.clone(),
+            )
+            .await
+        }
+        Err(error) => Err(error.into()),
+    };
+    // Refresh is part of this task's future: the scheduler keeps polling other
+    // downloads while it waits for the parser, and the same token remains live.
+    handle_download_outcome(app, state, &settings, &task, outcome, &cancel_token).await
+}
+
+// Created at pickup, before the future is polled. Dropping a queued or failed
+// future must release its cancellation slot as well as a normal completion.
+struct AttemptGuard<'a> {
+    state: &'a AppState,
+    task_id: String,
+}
+
+impl Drop for AttemptGuard<'_> {
+    fn drop(&mut self) {
+        let _ = self.state.clear_task_cancel_token(&self.task_id);
+    }
+}
+
+async fn handle_download_outcome(
+    app: &AppHandle,
+    state: &AppState,
+    settings: &SettingsSnapshot,
+    task: &DownloadTask,
+    outcome: CommandResult<()>,
+    cancel_token: &FetchCancelToken,
+) -> CommandResult<()> {
+    let Err(mut error) = outcome else {
+        return Ok(());
+    };
+    if cancel_token.is_cancelled() && !matches!(state.task_status(&task.id), Ok(TaskStatus::Muxing))
+    {
+        return Ok(());
+    }
+    match state.task_status(&task.id) {
+        Ok(TaskStatus::Paused | TaskStatus::Cancelled) => {
+            emit_queue_log(app, state, &task.id, QueueLogLevel::Warning, "任务已停止")?;
+        }
+        Ok(TaskStatus::Completed) => {
+            let completed = state.task_snapshot(&task.id)?;
+            events::emit(app, events::QUEUE_TASK_UPDATED, &completed)?;
+            emit_queue_log(
+                app,
+                state,
+                &task.id,
+                QueueLogLevel::Warning,
+                &format!(
+                    "成品已生成，但收尾处理未完全完成：{}",
+                    error.diagnostic_message()
+                ),
+            )?;
+        }
+        _ => {
+            let auto_refresh_attempts = state
+                .task_logs(&task.id, 50)
+                .map(|logs| recent_auto_refresh_attempt_count(&logs))
+                .unwrap_or_default();
+            if settings.auto_refresh_expired_urls
+                && matches!(state.task_status(&task.id), Ok(TaskStatus::Downloading))
+                && is_expired_url_error(&error.diagnostic_message())
+                && auto_refresh_attempts < MAX_AUTO_REFRESH_ATTEMPTS
+            {
+                let attempt = auto_refresh_attempts + 1;
+                emit_queue_log(
+                    app,
+                    state,
+                    &task.id,
+                    QueueLogLevel::Warning,
+                    &format!("自动刷新过期链接（{attempt}/{MAX_AUTO_REFRESH_ATTEMPTS}）"),
+                )?;
+
+                let Some(refreshed) =
+                    cancellable_refresh(cancel_token, state.refresh_task_media_urls(&task.id))
+                        .await
+                else {
+                    return Ok(());
+                };
+                match refreshed {
+                    Ok(_) => {
+                        if let Some(retried) = state.finish_task_attempt(
+                            &task.id,
+                            TaskStatus::Waiting,
+                            cancel_token,
+                        )? {
+                            events::emit(app, events::QUEUE_TASK_UPDATED, &retried)?;
+                        }
+                        return Ok(());
+                    }
+                    Err(refresh_error) => {
+                        let failure = crate::commands::CommandError::from(refresh_error);
+                        emit_queue_log(
+                            app,
+                            state,
+                            &task.id,
+                            QueueLogLevel::Error,
+                            &format!(
+                                "[stage=refresh_urls code={}] 自动刷新过期链接失败：{}",
+                                failure.code,
+                                failure.diagnostic_message()
+                            ),
+                        )?;
+                        error = failure;
+                    }
+                }
+            }
+
+            if let Some(failed) =
+                state.finish_task_attempt(&task.id, TaskStatus::Failed, cancel_token)?
+            {
+                events::emit(app, events::QUEUE_TASK_UPDATED, &failed)?;
+                let message = if error.diagnostic_message().starts_with("[stage=") {
+                    error.diagnostic_message()
+                } else {
+                    format!(
+                        "[stage=task code={}] {}",
+                        error.code,
+                        error.diagnostic_message()
+                    )
+                };
+                emit_queue_log(app, state, &task.id, QueueLogLevel::Error, &message)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn cancellable_refresh<T>(
+    cancel_token: &FetchCancelToken,
+    refresh: impl std::future::Future<Output = T>,
+) -> Option<T> {
+    tokio::select! {
+        biased;
+        () = cancel_token.cancelled() => None,
+        result = refresh => Some(result),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse_pacing::ParsePacer;
+    use bdl_core::settings::ParseRules;
+    use futures::FutureExt;
+    use std::time::Duration;
+    use tokio::time::Instant;
+
+    #[test]
+    fn dropping_an_unpolled_attempt_releases_its_pickup_slot() {
+        let root = std::env::temp_dir().join(format!("bdl-attempt-{}", uuid::Uuid::new_v4()));
+        drop(bdl_core::storage::TaskStorage::open(root.join("state/tasks.sqlite")).unwrap());
+        let state = AppState::new(root.join("state"), root.join("downloads")).unwrap();
+        let token = state.register_task_cancel_token("picked").unwrap();
+        state.cancel_running_task("picked").unwrap();
+        assert!(token.is_cancelled());
+        // Re-registration at first poll must not replace the cancelled token.
+        assert!(
+            state
+                .register_task_cancel_token("picked")
+                .unwrap()
+                .is_cancelled()
+        );
+        let guard = AttemptGuard {
+            state: &state,
+            task_id: "picked".into(),
+        };
+        let unpolled = async move {
+            let _attempt = guard;
+        };
+        drop(unpolled);
+        assert!(!state.cancel_running_task("picked").unwrap());
+        drop(state);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn refresh_cooldown_does_not_block_sibling_and_can_be_cancelled() {
+        let pacer = ParsePacer::default();
+        let rules = ParseRules {
+            pages_per_round: 1,
+            interval_seconds: 10,
+            rest_seconds: 10,
+        };
+        pacer.run(rules, async { Ok(()) }, |_| 1).await.unwrap();
+        let token = FetchCancelToken::new();
+        let mut running = FuturesUnordered::new();
+        let started = Instant::now();
+        running.push(
+            async {
+                cancellable_refresh(
+                    &token,
+                    pacer.run(
+                        rules,
+                        async {
+                            panic!("cancelled refresh must not send a request");
+                            #[allow(unreachable_code)]
+                            Ok(())
+                        },
+                        |_| 0,
+                    ),
+                )
+                .await
+                .map(|result| result.unwrap())
+            }
+            .boxed(),
+        );
+        running.push(
+            async {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                Some(())
+            }
+            .boxed(),
+        );
+        assert_eq!(running.next().await, Some(Some(())));
+        assert_eq!(started.elapsed(), Duration::from_secs(1));
+        token.cancel();
+        assert_eq!(running.next().await, Some(None));
+        assert_eq!(started.elapsed(), Duration::from_secs(1));
+        // Cancellation drops the resolver future and releases the shared gate.
+        pacer.run(rules, async { Ok(()) }, |_| 0).await.unwrap();
+        assert_eq!(started.elapsed(), Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn cancelled_refresh_wins_over_ready_result() {
+        let token = FetchCancelToken::new();
+        token.cancel();
+        assert_eq!(cancellable_refresh(&token, async { 42 }).await, None);
+    }
+}

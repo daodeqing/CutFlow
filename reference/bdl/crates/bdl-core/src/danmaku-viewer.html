@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  />
+  <title>离线弹幕</title>
+  <style>
+    body {
+      margin: 0;
+      background: #17191f;
+      color: #eee;
+      font: 16px system-ui;
+    }
+    main {
+      max-width: 1100px;
+      margin: auto;
+      padding: 20px;
+    }
+    label,
+    button,
+    input {
+      font: inherit;
+    }
+    button {
+      cursor: pointer;
+    }
+    .screen {
+      position: relative;
+      aspect-ratio: 16/9;
+      background: #000;
+      overflow: hidden;
+      margin: 16px 0;
+    }
+    video {
+      width: 100%;
+      height: 100%;
+    }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .comment {
+      position: absolute;
+      white-space: pre;
+      text-shadow: 1px 1px 2px #000;
+      font-weight: 600;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    td {
+      padding: 8px;
+      border-bottom: 1px solid #363942;
+      overflow-wrap: anywhere;
+    }
+    td:first-child {
+      width: 90px;
+    }
+    #list {
+      max-height: 320px;
+      overflow: auto;
+    }
+  </style>
+  <main>
+    <h1>离线弹幕</h1>
+    <p>可直接播放弹幕，或选择本地视频同步播放。</p>
+    <label>本地视频 <input id="file" type="file" accept="video/*" /></label>
+    <div class="screen">
+      <video id="video" controls></video>
+      <div class="overlay" id="overlay"></div>
+    </div>
+    <div class="controls">
+      <button id="play">播放弹幕</button
+      ><label
+        >进度
+        <input id="seek" type="range" min="0" step="0.1" value="0" /></label
+      ><span id="time"></span>
+    </div>
+    <p id="status"></p>
+    <div id="list">
+      <table>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </main>
+  <script>
+    "use strict";
+    const xml = __BDL_XML__;
+    const documentXml = new DOMParser().parseFromString(xml, "application/xml");
+    const comments = Array.from(documentXml.querySelectorAll("d"))
+      .map((node) => {
+        const p = (node.getAttribute("p") || "").split(",");
+        return {
+          time: Number(p[0]),
+          mode: Number(p[1]),
+          size: Number(p[2]),
+          color: Number(p[3]),
+          text: node.textContent || "",
+        };
+      })
+      .filter((c) => Number.isFinite(c.time) && c.time >= 0)
+      .sort((a, b) => a.time - b.time);
+    const video = document.getElementById("video"),
+      overlay = document.getElementById("overlay"),
+      seek = document.getElementById("seek"),
+      play = document.getElementById("play");
+    document.getElementById("status").textContent = documentXml.querySelector(
+      "parsererror",
+    )
+      ? "弹幕 XML 无效"
+      : `共 ${comments.length} 条弹幕`;
+    const duration = comments.reduce((max, c) => Math.max(max, c.time + 8), 1);
+    seek.max = duration;
+    let playing = false,
+      current = 0,
+      previous = performance.now(),
+      url = null;
+    document.getElementById("file").onchange = (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      if (url) URL.revokeObjectURL(url);
+      url = URL.createObjectURL(file);
+      video.src = url;
+      overlay.replaceChildren();
+      playing = false;
+    };
+    play.onclick = () => {
+      if (video.src) {
+        if (video.paused) video.play().catch(() => {});
+        else video.pause();
+      } else playing = !playing;
+      play.textContent = playing || !video.paused ? "暂停弹幕" : "播放弹幕";
+    };
+    seek.oninput = () => {
+      current = Number(seek.value);
+      if (video.src) video.currentTime = current;
+    };
+    video.onloadedmetadata = () => {
+      seek.max = Number.isFinite(video.duration) ? video.duration : duration;
+    };
+    for (const c of comments.slice(0, 1000)) {
+      const row = document.createElement("tr"),
+        time = document.createElement("td"),
+        text = document.createElement("td");
+      time.textContent = c.time.toFixed(1) + " s";
+      text.textContent = c.text;
+      row.append(time, text);
+      document.getElementById("rows").append(row);
+    }
+    if (comments.length > 1000)
+      document.getElementById("status").textContent +=
+        "；列表显示前 1000 条，播放包含全部弹幕";
+    function lowerBound(time) {
+      let low = 0,
+        high = comments.length;
+      while (low < high) {
+        const mid = (low + high) >>> 1;
+        if (comments[mid].time < time) low = mid + 1;
+        else high = mid;
+      }
+      return low;
+    }
+    function frame(now) {
+      const delta = (now - previous) / 1000;
+      previous = now;
+      if (video.src) current = video.currentTime;
+      else if (playing) current = Math.min(duration, current + delta);
+      if (current >= duration && !video.src) {
+        playing = false;
+        play.textContent = "播放弹幕";
+      }
+      seek.value = current;
+      document.getElementById("time").textContent = current.toFixed(1) + " s";
+      overlay.replaceChildren();
+      const height = overlay.clientHeight,
+        width = overlay.clientWidth,
+        lanes = Math.max(1, Math.floor(height / 32));
+      for (
+        let index = lowerBound(current - 8);
+        index < comments.length && comments[index].time <= current;
+        index++
+      ) {
+        const c = comments[index],
+          age = current - c.time;
+        const span = document.createElement("span");
+        span.className = "comment";
+        span.textContent = c.text;
+        span.style.color =
+          "#" +
+          Math.max(
+            0,
+            Math.min(16777215, Number.isFinite(c.color) ? c.color : 16777215),
+          )
+            .toString(16)
+            .padStart(6, "0");
+        span.style.fontSize = Math.max(12, Math.min(36, c.size || 25)) + "px";
+        span.style.top = (index % lanes) * 32 + "px";
+        overlay.append(span);
+        if (c.mode === 4 || c.mode === 5) {
+          span.style.left = Math.max(0, (width - span.offsetWidth) / 2) + "px";
+          span.style.top = (c.mode === 4 ? Math.max(0, height - 40) : 0) + "px";
+        } else
+          span.style.left =
+            width - (age / 8) * (width + span.offsetWidth) + "px";
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  </script>
+</html>

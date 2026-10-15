@@ -1,0 +1,327 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// CutFlow native acquisition workspace.
+import { ScrollView } from "std-widgets.slint";
+import { Select } from "../primitives/select.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph } from "../icons.slint";
+import { Modal, Button } from "../primitives/modal.slint";
+
+
+component Entry inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <bool> secret;
+    callback edited();
+    callback accepted();
+    min-height: 32px; max-height: 32px;
+    horizontal-stretch: 1;
+    border-radius: 6px;
+    background: Theme.field;
+    border-width: 1px;
+    border-color: edit.has-focus ? Theme.accent : Theme.line;
+    TouchArea { clicked => { edit.focus(); } }
+    edit := TextInput {
+        x: 10px; y: (parent.height - self.preferred-height) / 2;
+        width: parent.width - 20px; height: self.preferred-height;
+        text <=> root.text; single-line: true;
+        input-type: root.secret ? InputType.password : InputType.text;
+        color: Theme.fg; font-size: 13px; font-family: Theme.font;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: Theme.on-accent;
+        edited => { root.edited(); }
+        accepted => { root.accepted(); }
+    }
+    if root.text == "": Text {
+        x: 10px; y: (parent.height - self.preferred-height) / 2;
+        width: parent.width - 20px; height: self.preferred-height;
+        text: root.placeholder; color: Theme.fg-dim; font-size: 12px; overflow: elide;
+    }
+}
+component ConsentToggle inherits Rectangle {
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> text;
+    callback toggled();
+    min-height: 26px; max-height: 26px;
+    opacity: root.enabled ? 1 : 0.45;
+    forward-focus: keys;
+    HorizontalLayout {
+        spacing: 8px;
+        Rectangle {
+            width: 16px; height: 16px; y: 5px;
+            border-radius: 3px; border-width: 1px;
+            border-color: root.checked ? Theme.accent : Theme.line-strong;
+            background: root.checked ? Theme.accent : Theme.field;
+            Text { text: root.checked ? "✓" : ""; color: Theme.on-accent; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        Text { text: root.text; color: Theme.fg-muted; font-size: 12px; vertical-alignment: center; horizontal-stretch: 1; }
+    }
+    TouchArea { enabled: root.enabled; clicked => { keys.focus(); root.checked = !root.checked; root.toggled(); } }
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (root.enabled && event.text == Key.Space) { root.checked = !root.checked; root.toggled(); return accept; }
+            reject
+        }
+    }
+}
+
+export struct DownloadJobData {
+    id: string, title: string, status: string, detail: string,
+    target: string, hint: string, tone: int,
+    resumable: bool, stoppable: bool, cancellable: bool,
+    removable: bool, importable: bool, revealable: bool, switchable: bool,
+}
+
+export component DownloadDialog inherits Modal {
+    in property <[DownloadJobData]> jobs;
+    in property <string> message;
+    in property <int> message-tone;
+    in property <string> formats;
+    in property <string> project;
+    in property <string> stats;
+    in property <string> activity;
+    in property <string> tools;
+    in property <string> form-error;
+    in property <bool> form-valid;
+    in property <bool> available;
+    in property <bool> busy;
+    in property <bool> can-parse;
+    in property <bool> parsing;
+    in property <bool> can-pause-all;
+    in property <bool> can-resume-all;
+    in property <bool> account-set;
+    callback form-changed(string, string, int, bool, string);
+    callback parse(string);
+    callback enqueue(string, string, int, bool, string);
+    callback pause(string);
+    callback resume(string);
+    callback cancel-job(string);
+    callback import-job(string);
+    callback remove-job(string);
+    callback reveal-job(string);
+    callback switch-project(string);
+    callback pause-all();
+    callback resume-all();
+    callback stop-parse();
+    callback check-tools();
+    callback reveal-tools();
+    callback choose-project(bool);
+    callback filter-changed(int, string);
+    callback save-cookie(string);
+    callback clear-cookie();
+    property <int> confirm-kind: 0;
+    property <bool> account-expanded: false;
+    property <string> credential-text;
+    property <string> confirm-id;
+    title: "素材采集工作台";
+    note: "CutFlow";
+    glyph: Glyph.none;
+    surface-width: 1060px;
+    surface-height: 820px;
+
+    function validate() { root.form-changed(link.text, parts.text, quality.current, lower.checked, rights.text); }
+    public function focus-surface() { keys.focus(); }
+    changed confirm-kind => { if (root.open) { keys.focus(); } }
+    function submit() { if (root.form-valid) { root.enqueue(link.text, parts.text, quality.current, lower.checked, rights.text); } }
+    changed open => {
+        root.confirm-kind = 0;
+        root.account-expanded = false;
+        root.credential-text = "";
+        if (root.open) { keys.focus(); root.validate(); }
+    }
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                if (root.confirm-kind != 0) { root.confirm-kind = 0; } else { root.closed(); }
+                return accept;
+            }
+            if (event.text == Key.Return && event.modifiers.control && root.confirm-kind == 0) {
+                root.submit(); return accept;
+            }
+            reject
+        }
+        ScrollView {
+            VerticalLayout {
+                padding: 16px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        spacing: 4px;
+                        Text { text: "从视频链接，到可剪素材"; font-size: 21px; font-weight: 600; color: Theme.fg; }
+                        Text { text: root.project == "" ? "先打开剪辑工程，下载会绑定该工程。" : "当前工程 · " + root.project; color: Theme.fg-muted; wrap: word-wrap; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { label: "新建工程"; enabled: !root.busy; clicked => { root.choose-project(true); } }
+                    Button { label: "打开工程"; enabled: !root.busy; clicked => { root.choose-project(false); } }
+                }
+                Rectangle {
+                    min-height: 44px;
+                    background: Theme.field;
+                    border-radius: 7px;
+                    HorizontalLayout {
+                        padding: 10px; spacing: 12px;
+                        Text { text: root.stats; color: Theme.fg; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: root.activity; color: root.busy ? Theme.accent : Theme.fg-muted; vertical-alignment: center; }
+                    }
+                }
+                Rectangle {
+                    min-height: 38px;
+                    border-radius: 6px;
+                    background: Theme.field;
+                    HorizontalLayout {
+                        padding: 10px;
+                        Text { text: root.message; color: root.message-tone == 2 ? Theme.danger : root.message-tone == 1 ? Theme.accent : Theme.fg-muted; wrap: word-wrap; }
+                    }
+                }
+                if root.confirm-kind != 0: VerticalLayout {
+                    spacing: 7px;
+                    Text { text: root.confirm-kind == 1 ? "取消此任务并保留已下载文件？" : root.confirm-kind == 2 ? "仅移除任务记录；媒体和工程引用会保留。" : "退出当前账号？本地媒体与工程会保留。"; color: Theme.fg; wrap: word-wrap; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button { label: "返回"; clicked => { root.confirm-kind = 0; } }
+                        Button {
+                            label: "确认"; danger: true;
+                            clicked => {
+                                if (root.confirm-kind == 1) { root.cancel-job(root.confirm-id); }
+                                if (root.confirm-kind == 2) { root.remove-job(root.confirm-id); }
+                                if (root.confirm-kind == 3) { root.clear-cookie(); }
+                                root.confirm-kind = 0;
+                            }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 18px;
+                    VerticalLayout {
+                        width: 308px;
+                        spacing: 7px;
+                        Text { text: "01   添加素材"; font-size: 15px; font-weight: 600; color: Theme.fg; }
+                        link := Entry {
+                            placeholder: "B站视频链接 / BV 号";
+                            edited => { root.validate(); }
+                            accepted => { if (root.can-parse) { root.parse(link.text); } }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Button { label: root.parsing ? "解析中…" : "解析可用画质"; enabled: root.can-parse && link.text != ""; clicked => { root.parse(link.text); } }
+                            if root.parsing: Button { label: "取消解析"; clicked => { root.stop-parse(); } }
+                        }
+                        HorizontalLayout {
+                            spacing: 7px;
+                            parts := Entry { text: "1"; min-width: 66px; max-width: 66px; horizontal-stretch: 0; placeholder: "分 P"; edited => { root.validate(); } }
+                            quality := Select {
+                                options: ["4K · qn120", "1080p · qn80", "账号可用最佳"];
+                                current: 0; horizontal-stretch: 1;
+                                changed(index) => { if (index == 2) { lower.checked = false; } root.validate(); }
+                            }
+                        }
+                        lower := ConsentToggle {
+                            text: "目标画质不可用时允许降档"; checked: false;
+                            enabled: quality.current != 2;
+                            toggled => { root.validate(); }
+                        }
+                        Text {
+                            text: quality.current == 0 && !lower.checked
+                                ? "严格 UHD：下载后校验像素，不满足则拒绝入库。"
+                                : "入库后显示实际规格，账号权限不足时停止。";
+                            color: Theme.fg-muted; wrap: word-wrap; font-size: 11px;
+                        }
+                        rights := Entry { placeholder: "用途或授权备注（必填）"; edited => { root.validate(); } }
+                        Text { text: root.form-error; color: Theme.fg-muted; wrap: word-wrap; font-size: 11px; }
+                        Button { label: "加入下载队列"; primary: true; large: true; block: true; enabled: root.form-valid; clicked => { root.submit(); } }
+                        Text { text: "Ctrl + Enter 加入队列 · 素材需有使用授权"; color: Theme.fg-muted; wrap: word-wrap; font-size: 11px; }
+                        Rectangle { height: 1px; background: Theme.line; }
+                        Text { text: "可用画质"; color: Theme.fg; font-weight: 600; }
+                        ScrollView {
+                            height: 58px;
+                            Text { text: root.formats == "" ? "解析后显示当前账号可访问的画质档位。" : root.formats; color: Theme.fg-muted; wrap: word-wrap; }
+                        }
+                    }
+                    Rectangle { width: 1px; background: Theme.line; }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 9px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text { text: "02   下载与入库"; font-size: 15px; font-weight: 600; color: Theme.fg; vertical-alignment: center; }
+                            Rectangle { horizontal-stretch: 1; }
+                            Button { label: "全部暂停"; enabled: root.can-pause-all; clicked => { root.pause-all(); } }
+                            Button { label: "继续队列"; enabled: root.can-resume-all; clicked => { root.resume-all(); } }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            filter := Select { max-width: 170px; options: ["全部任务", "进行中", "待入库", "已完成 / 取消", "失败 / 暂停"]; changed(index) => { root.filter-changed(self.current, search.text); } }
+                            search := Entry { placeholder: "搜索链接、分 P 或工程"; horizontal-stretch: 1; edited => { root.filter-changed(filter.current, self.text); } }
+                        }
+                        ScrollView {
+                            min-height: 298px;
+                            vertical-stretch: 1;
+                            VerticalLayout {
+                                spacing: 8px;
+                                if root.jobs.length == 0: Rectangle {
+                                    min-height: 145px;
+                                    background: Theme.field;
+                                    border-radius: 8px;
+                                    VerticalLayout {
+                                        padding: 20px; spacing: 10px; alignment: center;
+                                        Text { text: "这里会显示你的素材任务"; color: Theme.fg; horizontal-alignment: center; }
+                                        Text { text: "从左侧添加素材，或调整筛选条件。\n下载完成并校验后，素材进入绑定工程。"; color: Theme.fg-muted; wrap: word-wrap; horizontal-alignment: center; }
+                                    }
+                                }
+                                for job in root.jobs: Rectangle {
+                                    min-height: 145px;
+                                    border-radius: 8px;
+                                    border-width: 1px;
+                                    border-color: job.tone == 1 ? Theme.accent : Theme.line;
+                                    background: Theme.field;
+                                    VerticalLayout {
+                                        padding: 11px; spacing: 6px;
+                                        HorizontalLayout {
+                                            spacing: 10px;
+                                            Text { text: job.title; color: Theme.fg; overflow: elide; horizontal-stretch: 1; font-weight: 600; }
+                                            Text { text: job.status; color: job.tone == 2 ? Theme.danger : job.tone == 1 ? Theme.accent : Theme.fg-muted; }
+                                        }
+                                        Text { text: job.detail; color: Theme.fg-muted; wrap: word-wrap; font-size: 11px; }
+                                        Text { text: "工程 · " + job.target; color: Theme.fg-muted; overflow: elide; font-size: 11px; }
+                                        if job.hint != "": Text { text: job.hint; color: job.tone == 2 ? Theme.danger : Theme.fg-muted; wrap: word-wrap; font-size: 11px; }
+                                        HorizontalLayout {
+                                            spacing: 5px;
+                                            if job.stoppable: Button { label: "暂停"; enabled: root.available; clicked => { root.pause(job.id); } }
+                                            if job.resumable: Button { label: job.status == "已取消" ? "重新排队" : "继续 / 重试"; enabled: root.available; clicked => { root.resume(job.id); } }
+                                            if job.importable: Button { label: "导入素材"; primary: true; enabled: root.available && !root.busy; clicked => { root.import-job(job.id); } }
+                                            if job.switchable: Button { label: "切换到工程"; enabled: !root.busy; clicked => { root.switch-project(job.id); } }
+                                            if job.revealable: Button { label: "文件夹"; clicked => { root.reveal-job(job.id); } }
+                                            if job.cancellable: Button { label: "取消"; enabled: root.available; clicked => { root.confirm-id = job.id; root.confirm-kind = 1; } }
+                                            if job.removable: Button { label: "移除记录"; enabled: root.available; clicked => { root.confirm-id = job.id; root.confirm-kind = 2; } }
+                                            Rectangle { horizontal-stretch: 1; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+                if root.account-expanded: HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: root.account-set ? "账号凭据 · 已加密保存" : "账号凭据 · 未设置"; color: Theme.fg-muted; vertical-alignment: center; }
+                    Entry { text <=> root.credential-text; placeholder: "自己的完整 Cookie（含 SESSDATA）"; secret: true; horizontal-stretch: 1; }
+                    Button { label: "保存凭据"; enabled: root.available && !root.busy && root.credential-text != ""; clicked => { root.save-cookie(root.credential-text); root.credential-text = ""; } }
+                    Button { label: "退出账号"; enabled: root.available && !root.busy && root.account-set; clicked => { root.credential-text = ""; root.confirm-kind = 3; } }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: root.tools; color: Theme.fg-muted; wrap: word-wrap; horizontal-stretch: 1; font-size: 11px; }
+                    Button { label: root.account-expanded ? "收起账号" : root.account-set ? "账号 · 已设置" : "设置账号"; clicked => { root.account-expanded = !root.account-expanded; root.credential-text = ""; } }
+                    Button { label: "检查组件"; enabled: !root.busy; clicked => { root.check-tools(); } }
+                    Button { label: "组件目录"; clicked => { root.reveal-tools(); } }
+                    Button { label: "返回剪辑"; clicked => { root.closed(); } }
+                }
+            }
+        }
+    }
+}
