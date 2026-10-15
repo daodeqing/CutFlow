@@ -4,5 +4,11 @@
     "bytes": 13,
     "sizeMiB": 0.0,
     "status": "recycled"
+  },
+  {
+    "path": ".build",
+    "bytes": 17248090983,
+    "sizeMiB": 16449.061,
+    "status": "recycled"
   }
 ]
