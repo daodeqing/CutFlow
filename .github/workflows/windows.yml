@@ -1,0 +1,46 @@
+name: Build CutFlow for Windows
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 190
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: 1.93.1
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Prepare pinned LLVM
+        shell: pwsh
+        working-directory: editor
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bash = "$env:ProgramFiles\Git\bin\bash.exe"
+          & $bash scripts/ci/fetch.sh llvm-win64 llvm.exe
+          if ($LASTEXITCODE -ne 0) { throw 'LLVM download failed' }
+          Start-Process -Wait -FilePath .\llvm.exe -ArgumentList '/S', '/D=C:\cutflow-llvm'
+          if (-not (Test-Path 'C:\cutflow-llvm\bin\libclang.dll')) { throw 'LLVM installation failed' }
+          'LIBCLANG_PATH=C:\cutflow-llvm\bin' | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Ensure installer compiler
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          }
+      - name: Build, test, smoke and package
+        shell: pwsh
+        run: ./scripts/Build-Windows.ps1 -Installer
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: CutFlow-0.2.0-windows-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/*setup.exe
+          if-no-files-found: error
