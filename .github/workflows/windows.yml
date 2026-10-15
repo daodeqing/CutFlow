@@ -38,6 +38,7 @@ jobs:
           name: CutFlow-build-diagnostics
           path: |
             .build/logs/*.log
+            .build/startup-check*/gui-startup.log
             dist/**/portable/logs/**
           include-hidden-files: true
           if-no-files-found: ignore

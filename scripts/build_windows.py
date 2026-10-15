@@ -20,14 +20,15 @@ def build(installer, skip_smoke):
     prepare()
     root, environment_variables = environment()
     target = Path(environment_variables['CARGO_TARGET_DIR'])
-    def run(arguments, cwd=root):
+    def run(arguments, cwd=root, process_environment=None):
         print('Running', ' '.join(str(argument) for argument in arguments), flush=True)
         logs=root / '.build/logs'
         logs.mkdir(exist_ok=True)
         log=logs / f'build-{len(list(logs.glob("build-*.log"))) + 1:03d}.log'
         with log.open('wb') as output:
             process=subprocess.Popen([str(argument) for argument in arguments], cwd=cwd,
-                                     env=environment_variables, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     env=environment_variables if process_environment is None else process_environment,
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                      creationflags=subprocess.CREATE_NO_WINDOW)
             for line in process.stdout:
                 output.write(line)
@@ -93,16 +94,27 @@ def build(installer, skip_smoke):
     if not skip_smoke:
         clean = environment_variables.copy()
         clean['PATH'] = os.environ.get('SystemRoot', 'C:/Windows') + '/System32'
+        clean.pop('CUTFLOW_RENDERER', None)
         for executable, arguments in [(stage / 'CutFlow.exe', ['--version']), (stage / 'CutFlow.exe', ['--smoke']),
                                       (tools / 'bdl.exe', ['--version']), (tools / 'ffmpeg.exe', ['-version']),
                                       (tools / 'ffprobe.exe', ['-version']), (tools / 'cutflow-agent.exe', ['schema'])]:
             result = subprocess.run([str(executable), *arguments], env=clean, capture_output=True, timeout=120,
                                     creationflags=subprocess.CREATE_NO_WINDOW)
+            log = root / '.build/logs' / f'smoke-{executable.stem}-{arguments[0].lstrip("-")}.log'
+            log.write_bytes(result.stdout + result.stderr)
             if result.returncode:
-                raise RuntimeError(f'Smoke failed: {executable.name}: {result.stderr.decode(errors="replace")}')
+                raise RuntimeError(f'Smoke failed: {executable.name} (exit {result.returncode}): {result.stderr.decode(errors="replace")}')
             if executable.name == 'cutflow-agent.exe':
                 json.loads(result.stdout)
-        run([sys.executable, '-B', 'tests/check_windows_startup.py', '--exe', stage / 'CutFlow.exe', '--state-dir', root / '.build/startup-check'])
+        run([sys.executable, '-B', 'tests/check_windows_startup.py', '--exe', stage / 'CutFlow.exe', '--state-dir', root / '.build/startup-check'], process_environment=clean)
+        software = clean.copy()
+        software['CUTFLOW_RENDERER'] = 'software'
+        result = subprocess.run([str(stage / 'CutFlow.exe'), '--smoke'], env=software,
+                                capture_output=True, timeout=120, creationflags=subprocess.CREATE_NO_WINDOW)
+        (root / '.build/logs/smoke-software.log').write_bytes(result.stdout + result.stderr)
+        if result.returncode:
+            raise RuntimeError(f'Software smoke failed (exit {result.returncode}): {result.stderr.decode(errors="replace")}')
+        run([sys.executable, '-B', 'tests/check_windows_startup.py', '--exe', stage / 'CutFlow.exe', '--state-dir', root / '.build/startup-check-software'], process_environment=software)
         recycle(stage / 'portable')
         (stage / 'portable').mkdir()
     archive = Path(str(stage) + '.zip')

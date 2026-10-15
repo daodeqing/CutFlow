@@ -328,53 +328,29 @@ pub fn select_backend(
     on_files_dropped: impl Fn(Vec<PathBuf>) + 'static,
     on_pressed_away: impl Fn() + 'static,
 ) -> Result<Option<Gpu>, PlatformError> {
-    // The device the renderer and the monitor share. Taken first, because
-    // the backend is selected with it.
-    let gpu = Gpu::acquire();
-    match &gpu {
-        None => log::warn!("no GPU adapter; the monitor composites on the CPU"),
-        // A software adapter is refused by Slint's selector unless this
-        // variable says otherwise: it enumerates the adapters on the instance
-        // it was handed, finds none that is a GPU, and `select` fails with
-        // "no GPU-backed WGPU adapter is available". From a double-clicked
-        // GUI build that failure went to a console nobody could see, and the
-        // app just never appeared. Setting it here is what the reporter did
-        // by hand, and the window, the editing and the export all worked on
-        // WARP - so the app does it for them and says so in the log.
-        // https://github.com/jub0t/Concat/issues/135
-        Some(gpu) if gpu.is_software() => {
-            log::warn!("the GPU adapter is a software rasteriser; the window will render slowly");
-            // SAFETY: the process is single-threaded at this point - the
-            // backend, the engine's threads and the window all come after
-            // this function - so nothing reads the environment concurrently.
-            unsafe { std::env::set_var("SLINT_WGPU_CPU", "1") };
+    let gpu = if std::env::var_os("CUTFLOW_RENDERER").is_some_and(|value| value == "software") {
+        log::info!("software rendering requested; the window and monitor render on the CPU");
+        None
+    } else {
+        match Gpu::acquire() {
+            Some(gpu) if gpu.is_software() => {
+                log::warn!("only a software GPU adapter is available; using the software window renderer and CPU monitor");
+                None
+            }
+            None => {
+                log::warn!("no usable GPU device; using the software window renderer and CPU monitor");
+                None
+            }
+            gpu => gpu,
         }
-        Some(_) => {}
-    }
+    };
 
     let mut selector = slint::BackendSelector::new()
         .backend_name("winit".into())
         .with_winit_custom_application_handler(DropHandler::new(on_files_dropped, on_pressed_away));
     selector = match &gpu {
         Some(gpu) => selector.require_wgpu_30(gpu.configuration()),
-        None => {
-            // Without a shared device, ask for the platform's own API by
-            // name: Skia picks its surface from a cfg chain, and requiring
-            // one turns a silent fall back to the CPU rasteriser into a
-            // refusal to start, which is a fault you can see.
-            #[cfg(target_vendor = "apple")]
-            {
-                selector.require_metal()
-            }
-            #[cfg(target_family = "windows")]
-            {
-                selector.require_d3d()
-            }
-            #[cfg(not(any(target_vendor = "apple", target_family = "windows")))]
-            {
-                selector
-            }
-        }
+        None => selector.renderer_name("software".into()),
     };
 
     // The custom title bar. The window draws its own strip, so the
