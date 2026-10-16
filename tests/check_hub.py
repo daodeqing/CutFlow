@@ -43,6 +43,7 @@ def verify(stage):
     flags = subprocess.CREATE_NO_WINDOW
     subprocess.run([str(ffmpeg), '-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=blue:s=64x64', '-frames:v', '1', str(fixtures / 'image.png')], check=True, capture_output=True, creationflags=flags)
     subprocess.run([str(ffmpeg), '-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=blue:s=64x64:r=25:d=1', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '1', '-c:v', 'mpeg4', '-c:a', 'aac', str(fixtures / 'video.mp4')], check=True, capture_output=True, creationflags=flags)
+    subprocess.run([str(ffmpeg), '-v', 'error', '-y', '-i', str(fixtures / 'image.png'), '-frames:v', '1', str(fixtures / 'image.jpg')], check=True, capture_output=True, creationflags=flags)
     posts = Counter()
     run_id = str(time.time_ns())
     authorized_media = []
@@ -80,6 +81,10 @@ def verify(stage):
             if self.path == '/v1/images/generations':
                 assert payload['n'] == 1 and payload['size'] == '1024x1024' and payload['quality'] == 'low'
                 self.send(200, 'application/json', json.dumps({'data':[{'b64_json':base64.b64encode((fixtures/'image.png').read_bytes()).decode()}]}).encode())
+                return
+            if model == 'jpeg-image':
+                data = 'data:image/jpeg;base64,' + base64.b64encode((fixtures/'image.jpg').read_bytes()).decode()
+                self.send(200, 'application/json', json.dumps({'choices':[{'message':{'content':f'![result]({data})'}}]}).encode())
                 return
             if model == 'quota':
                 self.send(402, 'application/json', b'{"error":{"code":"insufficient_quota"}}')
@@ -146,6 +151,9 @@ def verify(stage):
             assert call('cutflow.generate', request)['jobId'] == submitted['jobId']
             image = complete(submitted['jobId'])['result']['assets'][0]
             assert image['width'] == 64 and Path(image['path']).is_relative_to(portable / 'generated')
+            jpeg_job = call('cutflow.generate', {'operationId':run_id+'-jpeg-image','kind':'image','model':'jpeg-image','prompt':'fixture','maxGenerationCalls':1,'stream':False})
+            jpeg = complete(jpeg_job['jobId'])['result']['assets'][0]
+            assert jpeg['stillImage'] is True and jpeg['duration'] is None and jpeg['width'] == 64
             for model, expected in [('veo-test-video', 'completed'), ('broken-stream', 'result_unknown'), ('quota', 'failed'), ('retry', 'failed')]:
                 request = {'operationId': run_id + '-smoke-' + model, 'kind': 'video' if model == 'veo-test-video' else 'image', 'model': model, 'prompt': 'fixture', 'maxGenerationCalls': 1}
                 submitted = call('cutflow.generate', request)

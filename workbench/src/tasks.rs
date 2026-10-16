@@ -595,8 +595,8 @@ impl Runtime {
         let codec = video
             .and_then(|stream| stream["codec_name"].as_str())
             .unwrap_or("");
-        let still_image =
-            matches!(codec, "png" | "mjpeg" | "webp" | "bmp" | "gif") && duration.is_none();
+        let still_image = is_still_image(&info, codec, audio, duration);
+        let duration = if still_image { None } else { duration };
         Ok(
             json!({"path":path,"duration":duration,"stillImage":still_image,"width":video.map(|video| &video["width"]),
             "height":video.map(|video| &video["height"]),"hasAudio":audio,"bytes":path.metadata()?.len()}),
@@ -614,5 +614,28 @@ impl Runtime {
         cutflow_download::process::run(command, cancel, 60)
             .ok()
             .map(|_| target)
+    }
+}
+
+
+// ffprobe may assign one-frame duration to the image2 demuxer (including JPEG).
+// Use the container as well as the codec so MJPEG videos remain videos.
+fn is_still_image(info: &Value, codec: &str, audio: bool, duration: Option<f64>) -> bool {
+    let image_container = info["format"]["format_name"].as_str().unwrap_or("")
+        .split(',').any(|name| matches!(name, "image2" | "image2pipe" | "png_pipe" | "jpeg_pipe" | "webp_pipe" | "bmp_pipe"));
+    !audio && matches!(codec, "png" | "mjpeg" | "webp" | "bmp" | "gif")
+        && (duration.is_none() || image_container)
+}
+
+#[cfg(test)]
+mod probe_regressions {
+    use super::*;
+    #[test]
+    fn a_single_jpeg_with_ffprobe_frame_duration_is_an_image() {
+        let info = json!({"format":{"format_name":"image2","duration":"0.040000"}});
+        assert!(is_still_image(&info, "mjpeg", false, Some(0.04)));
+        let video = json!({"format":{"format_name":"avi","duration":"0.040000"}});
+        assert!(!is_still_image(&video, "mjpeg", false, Some(0.04)));
+        assert!(!is_still_image(&info, "mjpeg", true, Some(0.04)));
     }
 }
