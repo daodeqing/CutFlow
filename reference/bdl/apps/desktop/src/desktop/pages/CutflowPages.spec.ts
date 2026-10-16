@@ -22,19 +22,19 @@ describe('CutFlow workspaces', () => {
     invoke.mockReset()
   })
 
-  it('submits a custom generation model without requiring a project', async () => {
+  it('submits a custom GFlow generation model without requiring a project', async () => {
     invoke.mockImplementation((_command, input) => {
       if (input.method === 'cutflow.hub.snapshot') return Promise.resolve({ connection: { baseUrl: 'http://localhost:8000/v1' }, models: [], references: [], jobs: [], fault: null })
       return Promise.resolve({ jobId: 'image-job' })
     })
     const wrapper = mount(KeepAlive, { slots: { default: () => h(CreationPage) }, global })
     await flushPromises()
-    await wrapper.get('#ai-model').setValue('my-custom-model')
+    await wrapper.get('#ai-model').setValue('gflow-custom-image')
     await wrapper.get('#ai-prompt').setValue('画一个安静的海边')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     const sent = invoke.mock.calls.find(([, input]) => input.method === 'cutflow.generate')?.[1].params
-    expect(sent.model).toBe('my-custom-model')
+    expect(sent.model).toBe('gflow-custom-image')
     expect(sent.projectPath).toBeUndefined()
     expect(sent.maxGenerationCalls).toBe(1)
     expect(sent.operationId).toBeTruthy()
@@ -63,26 +63,44 @@ describe('CutFlow workspaces', () => {
     wrapper.unmount()
   })
 
-  it('defaults to a compatible image model, preserves explicit GFlow choice, and never retries it silently', async () => {
+  it('lists only GFlow images, preserves explicit selection and never retries failures silently', async () => {
     invoke.mockImplementation((_command, input) => {
       if (input.method === 'cutflow.hub.snapshot') return Promise.resolve({
         connection: { baseUrl: 'http://localhost/v1' }, references: [], jobs: [], fault: null,
-        models: [{ id: 'gflow-nano-banana-2.1', kind: 'image' }, { id: 'gpt-image-1.5', kind: 'image' }],
+        models: [
+          { id: 'gflow-nano-banana-2.1', kind: 'image' }, { id: 'gflow-nano-banana-2-lite', kind: 'image' },
+          { id: 'gpt-image-1.5', kind: 'image' }, { id: 'gpt-6-sol', kind: 'unknown' },
+          { id: 'gflow-omni-1.1-flash', kind: 'unknown' }, { id: 'gflow-veo-3.1-fast', kind: 'video' },
+        ],
       })
       return Promise.reject({ message: 'provider rejected' })
     })
     const wrapper = mount(KeepAlive, { slots: { default: () => h(CreationPage) }, global })
     await flushPromises()
-    expect((wrapper.get('#ai-model').element as HTMLInputElement).value).toBe('gpt-image-1.5')
-    await wrapper.get('#ai-model').setValue('gflow-nano-banana-2.1')
+    expect((wrapper.get('#ai-model').element as HTMLInputElement).value).toBe('gflow-nano-banana-2-lite')
+    await wrapper.findAll('button').find(button => button.text() === '选择')!.trigger('click')
+    const choices = wrapper.findAll('.model-options button').map(button => button.text())
+    expect(choices).toEqual(['gflow-nano-banana-2.1', 'gflow-nano-banana-2-lite'])
+    expect(wrapper.text()).not.toContain('使用兼容图片模型')
+    await wrapper.get('.model-options button').trigger('click')
     await wrapper.get('#ai-prompt').setValue('人物')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(invoke.mock.calls.filter(([, input]) => input.method === 'cutflow.generate')).toHaveLength(1)
     expect((wrapper.get('#ai-model').element as HTMLInputElement).value).toBe('gflow-nano-banana-2.1')
-    await wrapper.findAll('button').find(button => button.text() === '使用兼容图片模型')!.trigger('click')
-    expect((wrapper.get('#ai-model').element as HTMLInputElement).value).toBe('gpt-image-1.5')
-    expect(invoke.mock.calls.filter(([, input]) => input.method === 'cutflow.generate')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('rejects a non-GFlow model before submitting generation', async () => {
+    invoke.mockResolvedValue({ connection: { baseUrl: 'http://localhost/v1' }, models: [], references: [], jobs: [], fault: null })
+    const wrapper = mount(KeepAlive, { slots: { default: () => h(CreationPage) }, global })
+    await flushPromises()
+    await wrapper.get('#ai-model').setValue('gpt-image-1.5')
+    await wrapper.get('#ai-prompt').setValue('人物')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(invoke.mock.calls.some(([, input]) => input.method === 'cutflow.generate')).toBe(false)
+    expect(wrapper.text()).toContain('请选择 GFlow')
     wrapper.unmount()
   })
 

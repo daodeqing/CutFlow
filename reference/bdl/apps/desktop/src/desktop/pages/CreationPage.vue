@@ -35,17 +35,16 @@ const error = ref('')
 const referenceName = ref('')
 const referenceKind = ref('character')
 let timer: ReturnType<typeof setInterval> | undefined
-const visibleModels = computed(() => models.value.filter(item => item.kind === kind.value || item.kind === 'unknown'))
+const gflowKind = (item: AiModel) => /^gflow-(veo|omni)-/.test(item.id) ? 'video' : item.kind
+const visibleModels = computed(() => models.value.filter(item => item.id.startsWith('gflow-') && gflowKind(item) === kind.value))
 const filteredModels = computed(() => visibleModels.value.filter(item => item.id.toLowerCase().includes(modelSearch.value.toLowerCase())))
 const activeJobs = computed(() => visibleJobs.value.filter(job => ['queued', 'running'].includes(job.status)))
 const capability = computed(() => models.value.find(item => item.id === model.value))
-const compatibleImageModel = computed(() =>
-  models.value.find(item => item.id === 'gpt-image-1.5')?.id
-  || models.value.find(item => item.kind === 'image' && item.id.startsWith('gpt-image-'))?.id
-  || '')
-const chooseCompatibleImage = () => { if (compatibleImageModel.value) model.value = compatibleImageModel.value }
 const chooseDefaultModel = () => {
-  if (kind.value === 'image' && !model.value.trim()) chooseCompatibleImage()
+  if (!model.value.trim() || !model.value.startsWith('gflow-')) {
+    model.value = (kind.value === 'image' ? visibleModels.value.find(item => item.id === 'gflow-nano-banana-2-lite') : undefined)?.id
+      || visibleModels.value[0]?.id || ''
+  }
 }
 watch(kind, chooseDefaultModel)
 const visibleJobs = computed(() => jobs.value.filter(job => job.method === 'cutflow.generate').slice().reverse())
@@ -75,6 +74,7 @@ const saveReference = async () => {
 const submit = async () => {
   busy.value = true; error.value = ''
   try {
+    if (!model.value.startsWith('gflow-')) throw new Error('请选择 GFlow 图片或视频模型')
     await cutflow('cutflow.generate', { operationId: operationId(), model: model.value.trim(), prompt: prompt.value.trim(), kind: kind.value, references: references.value, maxGenerationCalls: kind.value === 'image' ? Number(count.value) : 1, n: kind.value === 'image' ? Number(count.value) : 1, aspect_ratio: aspect.value, image_size: kind.value === 'image' ? imageSize.value : undefined, duration: kind.value === 'video' ? Number(duration.value) : undefined, stream: stream.value })
     await refresh()
   } catch (reason) { error.value = errorMessage(reason) }
@@ -104,20 +104,19 @@ onUnmounted(stop)
 </script>
 <template>
   <section class="cutflow-page creation-page">
-    <header class="cutflow-page-heading"><div><p class="eyebrow">AI STUDIO</p><h1>从一个想法，开始创作</h1><p>连接兼容 OpenAI 的图片与视频服务，作品自动保存到本地。</p></div><UiButton variant="secondary" @click="ui.setTab('settings')"><UIcon name="i-tabler-plug-connected" aria-hidden="true" />连接设置</UiButton></header>
+    <header class="cutflow-page-heading"><div><p class="eyebrow">AI STUDIO</p><h1>从一个想法，开始创作</h1><p>使用 GFlow 图片与视频模型，作品自动保存到本地。</p></div><UiButton variant="secondary" @click="ui.setTab('settings')"><UIcon name="i-tabler-plug-connected" aria-hidden="true" />连接设置</UiButton></header>
     <p v-if="!baseUrl" class="cutflow-notice">先在设置中填写服务地址和 API Key。无需创建剪辑工程。</p>
     <div class="creation-layout">
       <form class="cutflow-card generation-form" @submit.prevent="submit">
         <UiTabs v-model="kind" :tabs="[{ label: '生成图片', value: 'image' }, { label: '生成视频', value: 'video' }]" />
         <label for="ai-model">模型</label>
-        <div class="model-field"><input id="ai-model" v-model="model" placeholder="选择模型或填写模型 ID" required /><UiButton variant="secondary" :aria-expanded="modelListOpen" aria-controls="ai-model-options" @click="modelListOpen = !modelListOpen">选择</UiButton><UiButton variant="ghost" :disabled="refreshing" @click="refreshModels">{{ refreshing ? '刷新中…' : '刷新' }}</UiButton></div>
-        <p v-if="kind === 'image' && model.startsWith('gflow-')" class="cutflow-notice" role="status">GFlow 登录同步成功不代表生成可用。若提示 Google 异常活动，可选择兼容图片模型；不会自动重发或替换本次任务。<UiButton v-if="compatibleImageModel" variant="secondary" @click="chooseCompatibleImage">使用兼容图片模型</UiButton></p>
-        <p v-else-if="imageApi" class="field-help">使用当前服务地址与密钥的图片接口，按服务商规则计费。</p>
+        <div class="model-field"><input id="ai-model" v-model="model" placeholder="选择 GFlow 模型或填写 GFlow 模型 ID" required /><UiButton variant="secondary" :aria-expanded="modelListOpen" aria-controls="ai-model-options" @click="modelListOpen = !modelListOpen">选择</UiButton><UiButton variant="ghost" :disabled="refreshing" @click="refreshModels">{{ refreshing ? '刷新中…' : '刷新' }}</UiButton></div>
+        <p v-if="model.startsWith('gflow-')" class="field-help">GFlow 登录同步成功不代表生成可用；任务失败时请查看具体网络或服务错误。程序不会自动换模型重发。</p>
         <div v-if="modelListOpen" id="ai-model-options" class="model-picker">
           <label for="ai-model-search">搜索模型</label><input id="ai-model-search" v-model="modelSearch" type="search" placeholder="输入模型名称筛选" />
           <div class="model-options" aria-label="可用生成模型" @wheel.stop>
             <button v-for="item in filteredModels" :key="item.id" type="button" :class="{ selected: item.id === model }" :aria-pressed="item.id === model" @click="model = item.id; modelListOpen = false">{{ item.id }}<small v-if="item.description">{{ item.description }}</small></button>
-            <p v-if="!filteredModels.length" class="field-help">没有匹配的生成模型，可刷新或填写自定义模型 ID。</p>
+            <p v-if="!filteredModels.length" class="field-help">没有匹配的 GFlow 模型，请确认服务已启用 GFlow 插件后刷新。</p>
           </div>
         </div>
         <div class="generation-options">
