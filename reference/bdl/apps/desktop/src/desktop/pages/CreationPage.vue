@@ -3,7 +3,7 @@ import { computed, onActivated, onDeactivated, onUnmounted, ref, watch } from 'v
 import { open } from '@tauri-apps/plugin-dialog'
 import UiButton from '../../shared/ui/Button.vue'
 import UiTabs from '../../shared/ui/Tabs.vue'
-import { cutflow, errorMessage, mediaSource, operationId, type AiModel, type HubSnapshot, type Job, type Reference } from '../../shared/api/cutflow'
+import { cutflow, errorMessage, mediaSource, operationId, type AiModel, type Asset, type HubSnapshot, type Job, type Reference } from '../../shared/api/cutflow'
 import { useCutflowStore } from '../../shared/stores/cutflow'
 import { useUiStore } from '../../shared/stores/ui'
 
@@ -39,17 +39,27 @@ const visibleModels = computed(() => models.value.filter(item => item.kind === k
 const filteredModels = computed(() => visibleModels.value.filter(item => item.id.toLowerCase().includes(modelSearch.value.toLowerCase())))
 const activeJobs = computed(() => visibleJobs.value.filter(job => ['queued', 'running'].includes(job.status)))
 const capability = computed(() => models.value.find(item => item.id === model.value))
+const compatibleImageModel = computed(() =>
+  models.value.find(item => item.id === 'gpt-image-1.5')?.id
+  || models.value.find(item => item.kind === 'image' && item.id.startsWith('gpt-image-'))?.id
+  || '')
+const chooseCompatibleImage = () => { if (compatibleImageModel.value) model.value = compatibleImageModel.value }
+const chooseDefaultModel = () => {
+  if (kind.value === 'image' && !model.value.trim()) chooseCompatibleImage()
+}
+watch(kind, chooseDefaultModel)
 const visibleJobs = computed(() => jobs.value.filter(job => job.method === 'cutflow.generate').slice().reverse())
 const refresh = async () => {
   try {
     const snapshot = await cutflow<HubSnapshot>('cutflow.hub.snapshot')
     jobs.value = snapshot.jobs; models.value = snapshot.models; savedReferences.value = snapshot.references; baseUrl.value = snapshot.connection.baseUrl
+    chooseDefaultModel()
     if (snapshot.fault) error.value = snapshot.fault
   } catch (reason) { error.value = errorMessage(reason) }
 }
 const refreshModels = async () => {
   refreshing.value = true; error.value = ''
-  try { const result = await cutflow<{ models: AiModel[] }>('cutflow.models.list'); models.value = result.models }
+  try { const result = await cutflow<{ models: AiModel[] }>('cutflow.models.list'); models.value = result.models; chooseDefaultModel() }
   catch (reason) { error.value = errorMessage(reason) }
   finally { refreshing.value = false }
 }
@@ -79,6 +89,13 @@ const openFile = async (path: string) => {
   try { await cutflow('cutflow.files.open', { path }) }
   catch (reason) { error.value = errorMessage(reason) }
 }
+const ratioMismatch = (job: Job, asset: Asset) => {
+  if (job.params.kind !== 'image' || !asset.width || !asset.height) return false
+  const ratio = String(job.params.aspect_ratio || 'auto')
+  if (ratio === 'auto') return false
+  const [width, height] = ratio.split(':').map(Number)
+  return width > 0 && height > 0 && Math.abs(asset.width / asset.height / (width / height) - 1) > 0.03
+}
 const statusLabel = (status: string) => ({ queued: '等待中', running: '生成处理中', completed: '已保存', failed: '失败', result_unknown: '结果待核查', interrupted: '已中断', cancelled: '已取消' }[status] || status)
 onActivated(() => { void refresh(); timer = setInterval(() => { void refresh() }, 1800) })
 const stop = () => { clearInterval(timer); timer = undefined }
@@ -94,6 +111,8 @@ onUnmounted(stop)
         <UiTabs v-model="kind" :tabs="[{ label: '生成图片', value: 'image' }, { label: '生成视频', value: 'video' }]" />
         <label for="ai-model">模型</label>
         <div class="model-field"><input id="ai-model" v-model="model" placeholder="选择模型或填写模型 ID" required /><UiButton variant="secondary" :aria-expanded="modelListOpen" aria-controls="ai-model-options" @click="modelListOpen = !modelListOpen">选择</UiButton><UiButton variant="ghost" :disabled="refreshing" @click="refreshModels">{{ refreshing ? '刷新中…' : '刷新' }}</UiButton></div>
+        <p v-if="kind === 'image' && model.startsWith('gflow-')" class="cutflow-notice" role="status">GFlow 登录同步成功不代表生成可用。若提示 Google 异常活动，可选择兼容图片模型；不会自动重发或替换本次任务。<UiButton v-if="compatibleImageModel" variant="secondary" @click="chooseCompatibleImage">使用兼容图片模型</UiButton></p>
+        <p v-else-if="imageApi" class="field-help">使用当前服务地址与密钥的图片接口，按服务商规则计费。</p>
         <div v-if="modelListOpen" id="ai-model-options" class="model-picker">
           <label for="ai-model-search">搜索模型</label><input id="ai-model-search" v-model="modelSearch" type="search" placeholder="输入模型名称筛选" />
           <div class="model-options" aria-label="可用生成模型" @wheel.stop>
@@ -122,7 +141,7 @@ onUnmounted(stop)
         <div v-if="!visibleJobs.length" class="creation-empty"><UIcon name="i-tabler-photo-spark" aria-hidden="true" /><h3>第一张画面，从这里诞生</h3><p>写下提示词，选择模型，生成后即可预览和送入剪辑。</p></div>
         <article v-for="job in visibleJobs" :key="job.id" class="cutflow-card generation-result">
           <header><span class="connection-badge" :class="{ warning: job.status === 'result_unknown' }">{{ statusLabel(job.status) }}</span><small>{{ job.params.model }}</small></header>
-          <template v-for="asset in job.result?.assets || []" :key="asset.path"><img v-if="job.params.kind === 'image'" :src="mediaSource(asset.path)" :alt="String(job.params.prompt)" loading="lazy" /><video v-else :src="mediaSource(asset.path)" :poster="job.result?.thumbnail ? mediaSource(job.result.thumbnail) : undefined" controls preload="metadata"></video><p class="field-help">{{ asset.width }} × {{ asset.height }}{{ asset.duration ? ` · ${asset.duration.toFixed(1)} 秒` : '' }}</p><div class="cutflow-actions"><UiButton @click="store.sendToEditor([asset.path])">送入剪辑</UiButton><UiButton variant="secondary" @click="openFile(asset.path)">打开本地文件</UiButton></div></template>
+          <template v-for="asset in job.result?.assets || []" :key="asset.path"><img v-if="job.params.kind === 'image'" :src="mediaSource(asset.path)" :alt="String(job.params.prompt)" loading="lazy" /><video v-else :src="mediaSource(asset.path)" :poster="job.result?.thumbnail ? mediaSource(job.result.thumbnail) : undefined" controls preload="metadata"></video><p class="field-help">{{ asset.width }} × {{ asset.height }}{{ asset.duration ? ` · ${asset.duration.toFixed(1)} 秒` : '' }}</p><p v-if="ratioMismatch(job, asset)" class="cutflow-notice">服务返回的比例与所选 {{ job.params.aspect_ratio }} 不一致，已保留原图；没有裁剪或再次生成。</p><div class="cutflow-actions"><UiButton @click="store.sendToEditor([asset.path])">送入剪辑</UiButton><UiButton variant="secondary" @click="openFile(asset.path)">打开本地文件</UiButton></div></template>
           <p class="generation-prompt">{{ job.params.prompt }}</p><p class="field-help" role="status">{{ job.error?.message || job.stage }}</p>
           <UiButton v-if="['queued', 'running'].includes(job.status)" variant="secondary" @click="jobAction(job, 'cutflow.jobs.cancel')">停止生成</UiButton>
           <UiButton v-if="job.canRetryDownload" variant="secondary" @click="jobAction(job, 'cutflow.jobs.retryDownload')">只重试下载结果</UiButton>

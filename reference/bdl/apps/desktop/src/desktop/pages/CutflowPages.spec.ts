@@ -63,6 +63,29 @@ describe('CutFlow workspaces', () => {
     wrapper.unmount()
   })
 
+  it('defaults to a compatible image model, preserves explicit GFlow choice, and never retries it silently', async () => {
+    invoke.mockImplementation((_command, input) => {
+      if (input.method === 'cutflow.hub.snapshot') return Promise.resolve({
+        connection: { baseUrl: 'http://localhost/v1' }, references: [], jobs: [], fault: null,
+        models: [{ id: 'gflow-nano-banana-2.1', kind: 'image' }, { id: 'gpt-image-1.5', kind: 'image' }],
+      })
+      return Promise.reject({ message: 'provider rejected' })
+    })
+    const wrapper = mount(KeepAlive, { slots: { default: () => h(CreationPage) }, global })
+    await flushPromises()
+    expect((wrapper.get('#ai-model').element as HTMLInputElement).value).toBe('gpt-image-1.5')
+    await wrapper.get('#ai-model').setValue('gflow-nano-banana-2.1')
+    await wrapper.get('#ai-prompt').setValue('人物')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(invoke.mock.calls.filter(([, input]) => input.method === 'cutflow.generate')).toHaveLength(1)
+    expect((wrapper.get('#ai-model').element as HTMLInputElement).value).toBe('gflow-nano-banana-2.1')
+    await wrapper.findAll('button').find(button => button.text() === '使用兼容图片模型')!.trigger('click')
+    expect((wrapper.get('#ai-model').element as HTMLInputElement).value).toBe('gpt-image-1.5')
+    expect(invoke.mock.calls.filter(([, input]) => input.method === 'cutflow.generate')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('exposes stop generation while a job is running', async () => {
     invoke.mockImplementation((_command, input) => {
       if (input.method === 'cutflow.hub.snapshot') return Promise.resolve({ connection: { baseUrl: 'http://localhost/v1' }, models: [], references: [], jobs: [{ id: 'running-job', method: 'cutflow.generate', status: 'running', params: { prompt: '海边' } }], fault: null })
@@ -94,6 +117,20 @@ describe('CutFlow workspaces', () => {
     await retries[0].trigger('click')
     await flushPromises()
     expect(invoke.mock.calls.some(([, input]) => input.method === 'cutflow.jobs.retryDownload' && input.params.jobId === 'download-failed')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows when provider output ignores the requested aspect without retrying', async () => {
+    invoke.mockImplementation((_command, input) => Promise.resolve({
+      connection: { baseUrl: 'http://localhost/v1' }, models: [], references: [], fault: null,
+      jobs: [{ id: 'saved', method: 'cutflow.generate', status: 'completed',
+        params: { kind: 'image', prompt: '人物', aspect_ratio: '1:1' },
+        result: { assets: [{ path: 'D:/saved.png', width: 1145, height: 1374 }] } }],
+    }))
+    const wrapper = mount(KeepAlive, { slots: { default: () => h(CreationPage) }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('服务返回的比例与所选 1:1 不一致')
+    expect(invoke.mock.calls.some(([, input]) => input.method === 'cutflow.generate')).toBe(false)
     wrapper.unmount()
   })
 

@@ -13,7 +13,7 @@ from prepare_native import prepare
 from prepare_webview import prepare as prepare_webview
 from recycle import recycle
 
-VERSION = '0.4.1'
+VERSION = '0.4.2'
 
 
 def build(installer, skip_smoke, component):
