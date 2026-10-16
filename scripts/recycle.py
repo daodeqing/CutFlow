@@ -1,6 +1,9 @@
 import ctypes
 from ctypes import wintypes
 import json
+import os
+import shutil
+import uuid
 from pathlib import Path
 
 
@@ -20,6 +23,17 @@ def recycle(path):
         size = sum(item.stat().st_size for item in target.rglob('*') if item.is_file() and not item.is_symlink())
     else:
         size = target.stat().st_size
+    # GitHub hosted runner volumes do not provide the desktop Recycle Bin.
+    # Preserve test state outside the distributable until the disposable runner is reclaimed.
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        archive = root / ".build/recycled-test-state" / (uuid.uuid4().hex + "-" + target.name)
+        archive.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(target), str(archive))
+        record = {"path": str(target.relative_to(root)), "bytes": size,
+                  "sizeMiB": round(size / 1048576, 3), "status": "preserved_on_runner",
+                  "archive": str(archive.relative_to(root))}
+        print(json.dumps(record, ensure_ascii=False), flush=True)
+        return record
     operation = FileOperation(None, 3, str(target) + '\0\0', None, 0x40 | 0x10 | 0x4 | 0x400, False, None, None)
     shell = ctypes.WinDLL('shell32', use_last_error=True)
     shell.SHFileOperationW.argtypes = [ctypes.POINTER(FileOperation)]
