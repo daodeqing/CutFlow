@@ -28,7 +28,7 @@ def recycle(path):
     if os.environ.get("GITHUB_ACTIONS") == "true":
         archive = root / ".build/recycled-test-state" / (uuid.uuid4().hex + "-" + target.name)
         archive.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(target), str(archive))
+        target.rename(archive)
         record = {"path": str(target.relative_to(root)), "bytes": size,
                   "sizeMiB": round(size / 1048576, 3), "status": "preserved_on_runner",
                   "archive": str(archive.relative_to(root))}

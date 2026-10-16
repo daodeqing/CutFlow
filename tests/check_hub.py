@@ -10,6 +10,7 @@ from pathlib import Path
 import subprocess
 import threading
 import time
+from check_windows_startup import capture_webview_children, close_webview_children
 
 
 def close_window(process):
@@ -29,8 +30,10 @@ def close_window(process):
             user32.PostMessageW(window, 0x0010, 0, 0)
         return True
 
+    webviews = capture_webview_children(process)
     user32.EnumWindows(close, 0)
     process.wait(timeout=15)
+    close_webview_children(webviews)
     if process.returncode:
         raise RuntimeError(f'Window exited with code {process.returncode}')
 

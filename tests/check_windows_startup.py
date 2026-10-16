@@ -6,6 +6,32 @@ import subprocess
 import sys
 import time
 from ctypes import wintypes
+import psutil
+
+
+def capture_webview_children(process):
+    try:
+        return [child for child in psutil.Process(process.pid).children(recursive=True)
+                if child.name().lower() == "msedgewebview2.exe"]
+    except psutil.Error:
+        return []
+
+
+def close_webview_children(children):
+    # Only processes created by this exact test application are eligible.
+    _, alive = psutil.wait_procs(children, timeout=3)
+    for child in alive:
+        try:
+            child.terminate()
+        except psutil.Error:
+            pass
+    _, alive = psutil.wait_procs(alive, timeout=5)
+    for child in alive:
+        try:
+            child.kill()
+        except psutil.Error:
+            pass
+    psutil.wait_procs(alive, timeout=5)
 
 
 def check_startup(executable, state_dir, timeout_seconds, settle_seconds):
@@ -27,6 +53,7 @@ def check_startup(executable, state_dir, timeout_seconds, settle_seconds):
         process = subprocess.Popen([str(executable)], cwd=executable.parent, env=environment,
                                    stdout=log, stderr=log, creationflags=subprocess.CREATE_NO_WINDOW)
         windows = []
+        webviews = []
 
         @callback_type
         def collect_window(window, _parameter):
@@ -54,6 +81,7 @@ def check_startup(executable, state_dir, timeout_seconds, settle_seconds):
                 raise RuntimeError(f'No visible application window after {timeout_seconds:g}s.')
             if any(user32.IsHungAppWindow(window) for window in windows):
                 raise RuntimeError('Application window is not responding.')
+            webviews = capture_webview_children(process)
             for window in windows:
                 title = ctypes.create_unicode_buffer(256)
                 user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
@@ -71,9 +99,12 @@ def check_startup(executable, state_dir, timeout_seconds, settle_seconds):
             if exit_code != 0:
                 raise RuntimeError(f'GUI shutdown failed: 0x{exit_code & 0xffffffff:08X}')
         finally:
+            if not webviews:
+                webviews = capture_webview_children(process)
             if process.poll() is None:
                 process.kill()
                 process.wait(timeout=10)
+            close_webview_children(webviews)
     print(f'PASS: window visible and responsive; log: {log_path}')
     if forced_shutdown:
         print('NOTE: background process required termination after the close request.')
