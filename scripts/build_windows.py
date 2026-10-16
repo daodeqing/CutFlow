@@ -13,7 +13,7 @@ from prepare_native import prepare
 from prepare_webview import prepare as prepare_webview
 from recycle import recycle
 
-VERSION = '0.4.2'
+VERSION = json.loads((Path(__file__).resolve().parents[1] / 'reference/bdl/apps/desktop/src-tauri/tauri.conf.json').read_text(encoding='utf-8'))['version']
 
 
 def build(installer, skip_smoke, component):
@@ -152,7 +152,7 @@ def build(installer, skip_smoke, component):
     deliverables = [archive]
     if installer:
         compiler = shutil.which('ISCC.exe') or str(Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)')) / 'Inno Setup 6/ISCC.exe')
-        run([compiler, f'/DStage={stage}', f'/DOutput={stage.parent}', root / 'scripts/CutFlow.iss'])
+        run([compiler, f'/DAppVersion={VERSION}', f'/DStage={stage}', f'/DOutput={stage.parent}', root / 'scripts/CutFlow.iss'])
         deliverables.append(stage.parent / f'CutFlow-{VERSION}-windows-x64-setup.exe')
     for path in deliverables:
         with path.open('rb') as source:

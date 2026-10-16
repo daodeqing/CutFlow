@@ -3,13 +3,20 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      component_run:
+        description: Reuse verified hub/editor artifacts from this run (optional)
+        required: false
+        default: ''
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: cutflow-windows-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   build:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.component_run == '' }}
     name: Build ${{ matrix.component }}
     strategy:
       fail-fast: false
@@ -60,6 +67,7 @@ jobs:
           if-no-files-found: ignore
   package:
     needs: build
+    if: ${{ always() && !cancelled() && (needs.build.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.component_run != '')) }}
     runs-on: windows-2022
     timeout-minutes: 40
     steps:
@@ -69,14 +77,24 @@ jobs:
           python-version: '3.12'
       - name: Install process inspection helper
         run: python -m pip install "psutil>=5.9,<8"
+      - name: Verify reused binary provenance
+        if: ${{ inputs.component_run != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CUTFLOW_COMPONENT_RUN: ${{ inputs.component_run }}
+        run: python -B -X utf8 scripts/verify_component_run.py
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: CutFlow-component-hub
           path: .build/artifacts/hub
+          run-id: ${{ inputs.component_run || github.run_id }}
+          github-token: ${{ github.token }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: CutFlow-component-editor
           path: .build/artifacts/editor
+          run-id: ${{ inputs.component_run || github.run_id }}
+          github-token: ${{ github.token }}
       - name: Ensure installer compiler
         shell: pwsh
         run: |
