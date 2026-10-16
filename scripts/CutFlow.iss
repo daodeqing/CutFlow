@@ -7,7 +7,7 @@
 [Setup]
 AppId={{F1A6C8E4-6378-4819-A862-762A5C58B140}
 AppName=CutFlow
-AppVersion=0.4.0
+AppVersion=0.4.1
 AppPublisher=CutFlow contributors
 DefaultDirName=D:\CutFlow
 DefaultGroupName=CutFlow
@@ -15,7 +15,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#Output}
-OutputBaseFilename=CutFlow-0.4.0-windows-x64-setup
+OutputBaseFilename=CutFlow-0.4.1-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 UninstallDisplayIcon={app}\CutFlow.exe

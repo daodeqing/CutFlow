@@ -4,15 +4,15 @@ defineEmits<{ openLink: [url: string] }>()
 const links = [
   {
     label: 'GitHub 仓库',
-    value: 'github.com/Yuelioi/bdl',
-    url: 'https://github.com/Yuelioi/bdl',
+    value: 'github.com/daodeqing/CutFlow',
+    url: 'https://github.com/daodeqing/CutFlow',
     icon: 'i-tabler-brand-github',
   },
   {
-    label: '作者 Bilibili',
-    value: 'space.bilibili.com/4279370',
-    url: 'https://space.bilibili.com/4279370',
-    icon: 'i-tabler-brand-bilibili',
+    label: '作者 daodeqing',
+    value: 'github.com/daodeqing',
+    url: 'https://github.com/daodeqing',
+    icon: 'i-tabler-user',
   },
 ]
 </script>
@@ -20,14 +20,14 @@ const links = [
 <template>
   <div class="usage-notice">
     <p class="usage-intro">
-      BDL 是用于解析、选择和下载 Bilibili 内容的本地工具。继续使用前，请确认你理解以下使用边界。
+      CutFlow 是由 daodeqing 维护的本地视频创作工具，提供 B站素材下载、剪辑与 AI 创作。继续使用前，请确认你理解以下使用边界。
     </p>
 
     <section class="usage-section usage-section-free">
       <UIcon name="i-tabler-gift" aria-hidden="true" />
       <div>
         <strong>软件免费</strong>
-        <p>BDL 软件本体免费，并以 MIT License 发布；官方仓库不设置激活码、会员版或付费解锁。</p>
+        <p>CutFlow 以 AGPL-3.0-or-later 发布；下载模块基于 BDL（MIT），剪辑模块基于 Concat。AI 服务的费用由所连接的服务决定。</p>
       </div>
     </section>
 
@@ -42,7 +42,7 @@ const links = [
     <section class="usage-copy">
       <strong>使用责任与免责声明</strong>
       <p>
-        BDL 不提供或托管视频内容。你应自行确认下载、保存、转换和使用内容具有合法授权，并遵守所在地法律法规、Bilibili 平台规则及内容权利人的要求。因具体使用方式产生的版权、账号、数据或其他风险由使用者自行承担。
+        CutFlow 不提供或托管视频内容。你应自行确认下载、保存、转换和使用内容具有合法授权，并遵守所在地法律法规、Bilibili 平台规则及内容权利人的要求。因具体使用方式产生的版权、账号、数据或其他风险由使用者自行承担。
       </p>
     </section>
 

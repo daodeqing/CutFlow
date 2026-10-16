@@ -703,6 +703,7 @@ export const useParseStore = defineStore('parse', {
               codec: options.codec ?? settings.saved.codec,
               media_preferences: mediaPreferences,
               }),
+              ...(options.quality !== undefined ? { quality: options.quality, media_preferences: mediaPreferences, missing_quality_policy: options.missingQualityPolicy ?? 'lower' } : {}),
               duplicate_policy: options.duplicatePolicy ?? 'ask',
               scheduled_at: options.scheduledAt,
               speed_limit_bytes_per_second: options.speedLimitBytesPerSecond,

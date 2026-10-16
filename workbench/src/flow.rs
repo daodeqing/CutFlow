@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     fs::File,
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -30,7 +30,8 @@ pub struct Model {
 pub fn describe(id: &str, description: &str) -> Model {
     let normalized = id.to_ascii_lowercase();
     let image = normalized.contains("image") || normalized.contains("imagen") || normalized.contains("banana");
-    let video = ["veo", "video", "t2v", "i2v", "r2v", "sora", "kling"].iter().any(|word| normalized.contains(word));
+    let text = normalized == "codex-auto-review" || !image && ["gpt-", "api-6", "gemini-", "claude-", "deepseek", "qwen"].iter().any(|prefix| normalized.starts_with(prefix));
+    let video = ["veo", "video", "t2v", "i2v", "r2v", "sora", "kling", "omni-1.1"].iter().any(|word| normalized.contains(word));
     let references = if image {
         3
     } else if id.contains("r2v") || id.contains("omni") {
@@ -49,7 +50,7 @@ pub fn describe(id: &str, description: &str) -> Model {
     Model {
         id: id.into(),
         description: description.into(),
-        kind: if image { "image" } else if video { "video" } else { "unknown" }.into(),
+        kind: if image { "image" } else if video { "video" } else if text { "text" } else { "unknown" }.into(),
         max_references: references,
         duration,
         aspect: if id.contains("portrait") {
@@ -163,29 +164,37 @@ pub struct StreamResult {
     pub content: String,
     pub url: Option<String>,
     pub done: bool,
+    pub control: Option<Value>,
 }
 
 impl StreamResult {
     pub fn event(&mut self, data: &str) -> Result<()> {
+        let mut data = data.trim();
+        while let Some(inner) = data.strip_prefix("data:") { data = inner.trim(); }
+        if data.is_empty() { return Ok(()); }
         if data.trim() == "[DONE]" {
             self.done = true;
             return Ok(());
         }
         let payload: Value = serde_json::from_str(data)
             .map_err(|_| Error::new("result_unknown", "生成服务返回无效消息，结果待核查"))?;
+        if let Some(control) = payload.get("gflow_control") { self.control = Some(control.clone()); }
         if payload.get("error").is_some() {
             return Err(Error::new(
                 match payload["error"]["code"].as_str().unwrap_or("") {
                     "insufficient_quota" | "insufficient_credit" => "insufficient_credit",
                     "rate_limit_exceeded" => "rate_limited",
+                    "cancelled" => "cancelled",
                     _ => "provider_error",
                 },
-                "生成服务报告失败，请在服务端核查详情与额度",
+                provider_message(&payload),
             ));
         }
         if payload["choices"][0]["finish_reason"].as_str().is_some_and(|reason| !reason.is_empty()) {
             self.done = true;
         }
+        if let Some(url) = payload["data"][0]["url"].as_str() { self.url = Some(url.into()); }
+        if let Some(data) = payload["data"][0]["b64_json"].as_str() { self.url = Some(format!("data:image/png;base64,{data}")); }
         if let Some(url) = payload["url"].as_str() {
             self.url = Some(url.into());
         }
@@ -204,7 +213,7 @@ impl StreamResult {
         if let Some(url) = message.and_then(|message| message["images"][0]["image_url"]["url"].as_str()) {
             self.url = Some(url.into());
         }
-        if self.content.len() + part.len() > 512 * 1024 {
+        if self.content.len() + part.len() > 32 * 1024 * 1024 {
             return Err(Error::new("provider_error", "生成服务响应超过安全长度"));
         }
         self.content.push_str(&part);
@@ -232,95 +241,173 @@ impl StreamResult {
     }
 }
 
+async fn cancellable<F: std::future::Future>(future: F, cancel: &AtomicBool) -> Result<F::Output> {
+    let mut future = std::pin::pin!(future);
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(Error::new("cancelled", "已停止生成请求；已提交云端的任务是否扣费以服务端为准"));
+        }
+        if let Ok(result) = tokio::time::timeout(Duration::from_millis(100), future.as_mut()).await {
+            return Ok(result);
+        }
+    }
+}
+
+fn provider_message(payload: &Value) -> String {
+    let text = payload["error"]["message"].as_str()
+        .or_else(|| payload["detail"].as_str()).unwrap_or("服务未返回错误详情");
+    let secret = regex::Regex::new(r"(?i)(?:bearer\s+|sk-)[a-z0-9_.-]+|(?:https?://)[^\s]+[?][^\s]+").unwrap();
+    secret.replace_all(text, "[REDACTED_SECRET]").chars().take(600).collect()
+}
+
+pub fn check_response(connection: &Connection, key: &str, model: &str) -> Result<Value> {
+    if describe(model, "").kind != "text" {
+        return Err(Error::new("invalid_request", "请选择普通文本模型测试回复；图片和视频请在创作页测试"));
+    }
+    let response = agent().post(&format!("{}/chat/completions", base_url(&connection.base_url)?))
+        .set("Authorization", &format!("Bearer {key}"))
+        .send_json(json!({"model":model,"messages":[{"role":"user","content":"只回复 OK"}],"stream":false,"max_tokens":16}))
+        .map_err(http_error)?;
+    let payload: Value = serde_json::from_reader(response.into_reader().take(1_000_000))?;
+    let answer = payload["choices"][0]["message"]["content"].as_str().unwrap_or("");
+    if answer.trim().is_empty() { return Err(Error::new("provider_error", "模型列表可读，但没有收到文本回复")); }
+    Ok(json!({"model":model,"answer":answer.chars().take(200).collect::<String>(),"verified":true}))
+}
+
 pub fn generate(
-    connection: &Connection,
-    key: &str,
-    request: &Value,
-    cancel: &AtomicBool,
+    connection: &Connection, key: &str, request: &Value, cancel: &AtomicBool,
     mut progress: impl FnMut(&str),
 ) -> Result<String> {
     let model = crate::required(request, "model")?;
     let prompt = crate::required(request, "prompt")?;
-    let mut content = vec![json!({"type":"text","text":prompt})];
-    let references = request["references"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
     let capability = describe(model, "");
+    if capability.kind == "text" {
+        return Err(Error::new("invalid_request", "这是文本模型，请选择图片或视频生成模型"));
+    }
+    let references = request["references"].as_array().cloned().unwrap_or_default();
     if references.len() > capability.max_references {
-        return Err(Error::new(
-            "invalid_request",
-            "所选模型不支持此数量的参考图，请选图生模型",
-        ));
+        return Err(Error::new("invalid_request", "所选模型不支持此数量的参考图"));
     }
+    let reference_paths = references.clone();
+    let mut content = vec![json!({"type":"text","text":prompt})];
     for reference in references {
-        let path = reference
-            .as_str()
-            .ok_or_else(|| Error::new("invalid_request", "参考图必须是本地路径"))?;
-        content
-            .push(json!({"type":"image_url","image_url":{"url":reference_data(Path::new(path))?}}));
-    }
-    if cancel.load(Ordering::SeqCst) {
-        return Err(Error::new("cancelled", "提交前已取消"));
+        content.push(json!({"type":"image_url","image_url":{"url":reference_data(Path::new(reference.as_str().ok_or_else(|| Error::new("invalid_request", "参考图必须是本地路径"))?))?}}));
     }
     let mut payload = json!({"model":model,"messages":[{"role":"user","content":content}],"stream":request["stream"].as_bool().unwrap_or(true)});
-    for field in ["aspect_ratio", "duration"] {
-        if let Some(value) = request.get(field).filter(|value| !value.is_null()) {
-            payload[field] = value.clone();
-        }
+    if model.starts_with("gflow-") && url::Url::parse(&connection.base_url).is_ok_and(|url| matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))) { payload["client_process_id"] = json!(std::process::id()); }
+    for field in ["aspect_ratio", "duration", "quality", "image_size", "client_request_id"] {
+        if let Some(value) = request.get(field).filter(|value| !value.is_null() && value.as_str() != Some("auto")) { payload[field] = value.clone(); }
     }
-    let response = agent()
-        .post(&format!(
-            "{}/chat/completions",
-            base_url(&connection.base_url)?
-        ))
-        .set("Authorization", &format!("Bearer {key}"))
-        .send_json(payload)
-        .map_err(http_error)?;
-    let streamed = response
-        .header("Content-Type")
-        .unwrap_or("")
-        .contains("text/event-stream");
-    let reader = response.into_reader().take(8 * 1024 * 1024);
-    let mut result = StreamResult::default();
-    if streamed {
-        let mut event = String::new();
-        for line in BufReader::new(reader).lines() {
-            if cancel.load(Ordering::SeqCst) {
-                return Err(Error::new(
-                    "result_unknown",
-                    "已停止本地等待；服务端可能仍在生成并计费",
-                ));
+    if model.starts_with("gflow-") || model.contains("gemini") || model.contains("banana") {
+        let mut image_config = json!({});
+        if let Some(aspect) = request["aspect_ratio"].as_str().filter(|s| *s != "auto") { image_config["aspectRatio"] = json!(aspect); }
+        if let Some(size) = request["image_size"].as_str().filter(|s| *s != "auto") { image_config["imageSize"] = json!(size); }
+        payload["generationConfig"] = json!({"imageConfig":image_config});
+    }
+    let image_api = model.starts_with("gpt-image-");
+    let mut endpoint = "chat/completions";
+    if image_api {
+        endpoint = if reference_paths.is_empty() { "images/generations" } else { "images/edits" };
+        payload = json!({"model":model,"prompt":prompt,"n":1});
+        let size = match request["aspect_ratio"].as_str().unwrap_or("auto") {"1:1"=>"1024x1024", "3:2"=>"1536x1024", "2:3"=>"1024x1536", "auto"=>"auto", _=>return Err(Error::new("invalid_request", "此图片模型支持 1:1、3:2、2:3 比例"))};
+        payload["size"] = json!(size);
+        let quality = match request["image_size"].as_str().unwrap_or("auto") {"1K"|"low"=>"low", "2K"|"medium"=>"medium", "4K"|"high"=>"high", _=>"auto"};
+        payload["quality"] = json!(quality);
+    }
+    let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::new("io_error", e.to_string()))?;
+    let mut control: Option<Value> = None;
+    let outcome = runtime.block_on(async {
+        let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(1800)).build()
+            .map_err(|_| Error::new("io_error", "HTTP 客户端初始化失败"))?;
+        let mut outgoing = client.post(format!("{}/{endpoint}", base_url(&connection.base_url)?)).bearer_auth(key);
+        if image_api && !reference_paths.is_empty() {
+            let mut form = reqwest::multipart::Form::new().text("model", model.to_string()).text("prompt", prompt.to_string()).text("n", "1");
+            for field in ["size", "quality"] { form = form.text(field, payload[field].as_str().unwrap_or("auto").to_string()); }
+            for (index, value) in reference_paths.iter().enumerate() {
+                let path = Path::new(value.as_str().ok_or_else(|| Error::new("invalid_request", "参考图路径无效"))?);
+                let data = reference_data(path)?;
+                let mime = data.split(';').next().unwrap_or("data:image/png").trim_start_matches("data:");
+                let extension = match mime {"image/jpeg"=>"jpg", "image/webp"=>"webp", _=>"png"};
+                let part = reqwest::multipart::Part::bytes(std::fs::read(path)?).file_name(format!("reference-{index}.{extension}")).mime_str(mime).map_err(|_| Error::new("invalid_request", "参考图格式无效"))?;
+                form = form.part("image[]", part);
             }
-            let line =
-                line.map_err(|_| Error::new("result_unknown", "流式连接中断，结果待核查"))?;
-            if line.len() > 1024 * 1024 {
-                return Err(Error::new("provider_error", "流式消息过长"));
-            }
-            if line.is_empty() && !event.is_empty() {
-                result.event(event.trim_end())?;
-                event.clear();
-                progress("生成服务处理中；收到进度消息");
-                if result.done {
-                    break;
+            outgoing = outgoing.multipart(form);
+        } else { outgoing = outgoing.json(&payload); }
+        let mut response = cancellable(outgoing.send(), cancel).await?
+            .map_err(|_| Error::new("result_unknown", "连接中断或超时；请核查服务端历史，不会自动重发"))?;
+        let status = response.status().as_u16();
+        let streamed = response.headers().get("content-type").and_then(|h| h.to_str().ok()).unwrap_or("").contains("text/event-stream");
+        let mut buffer = Vec::new();
+        let mut total = 0usize;
+        let mut result = StreamResult::default();
+        while let Some(chunk) = cancellable(response.chunk(), cancel).await?
+            .map_err(|_| Error::new("result_unknown", "响应中断，生成结果待核查"))? {
+            total += chunk.len();
+            if total > 40 * 1024 * 1024 { return Err(Error::new("provider_error", "响应超过 40 MiB")); }
+            buffer.extend_from_slice(&chunk);
+            if streamed && status < 400 {
+                while let Some((end, separator)) = buffer.windows(2).position(|w| w == b"\n\n").map(|i| (i, 2))
+                    .or_else(|| buffer.windows(4).position(|w| w == b"\r\n\r\n").map(|i| (i, 4))) {
+                    let event = String::from_utf8_lossy(&buffer[..end]);
+                    let data = event.lines().filter_map(|line| line.strip_prefix("data:").map(str::trim_start)).collect::<Vec<_>>().join("\n");
+                    if !data.is_empty() {
+                        result.event(&data).map_err(|mut error| { error.message = error.message.replace(key, "[REDACTED_SECRET]"); error })?;
+                        if result.control.is_some() { control = result.control.clone(); }
+                        progress("服务正在处理；已收到进度");
+                    }
+                    buffer.drain(..end + separator);
+                    if result.done { break; }
                 }
-            } else if let Some(data) = line.strip_prefix("data:") {
-                event.push_str(data.strip_prefix(' ').unwrap_or(data));
-                event.push('\n');
+                if result.done { break; }
             }
         }
-        if !event.is_empty() {
-            result.event(event.trim_end())?;
+        if status >= 400 {
+            let body = serde_json::from_slice::<Value>(&buffer).unwrap_or_default();
+            return Err(Error::new(match status {401|403=>"provider_unauthorized",402=>"insufficient_credit",429=>"rate_limited",_=>"provider_error"},
+                format!("HTTP {status}：{}", provider_message(&body).replace(key, "[REDACTED_SECRET]"))));
         }
-        if !result.done {
-            return Err(Error::new("result_unknown", "流式响应提前结束，结果待核查；不会重新提交生成"));
+        if streamed {
+            if !result.done { return Err(Error::new("result_unknown", "流式响应提前结束；请核查服务端历史，不会自动重发")); }
+        } else {
+            let body: Value = serde_json::from_slice(&buffer).map_err(|_| Error::new("result_unknown", "响应格式无效，结果待核查"))?;
+            result.event(&body.to_string())?;
         }
-    } else {
-        let payload: Value = serde_json::from_reader(reader)
-            .map_err(|_| Error::new("result_unknown", "响应中断或格式无效，生成结果待核查"))?;
-        result.event(&payload.to_string())?;
+        result.media_url()
+    });
+    if cancel.load(Ordering::SeqCst) {
+        let mut pipe_ack = false;
+        #[cfg(windows)]
+        if model.starts_with("gflow-") && url::Url::parse(&connection.base_url).is_ok_and(|url| matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))) {
+            if let Some(id) = request["client_request_id"].as_str().filter(|id| id.len() <= 40 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')) {
+                let name = format!(r"\\.\pipe\gflow-cancel-{id}");
+                if let Ok(mut pipe) = std::fs::OpenOptions::new().read(true).write(true).open(name) {
+                    pipe_ack = pipe.write_all(b"cancel\n").is_ok();
+                }
+            }
+        }
+        if !pipe_ack && control.is_none() && model.starts_with("gflow-") {
+            if let Some(id) = request["client_request_id"].as_str().filter(|id| id.len() <= 40 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')) {
+                if let Ok(base) = url::Url::parse(&connection.base_url) {
+                    if matches!(base.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")) {
+                        if let Ok(address) = base.join(&format!("/v0/resource/plugins/gflow/tmp/control-{id}.json")) {
+                            if let Ok(response) = ureq::get(address.as_str()).timeout(Duration::from_secs(2)).call() {
+                                control = serde_json::from_reader(response.into_reader().take(4096)).ok();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(control) = control.filter(|_| !pipe_ack).filter(|_| url::Url::parse(&connection.base_url).is_ok_and(|url| matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]")))) {
+            if let (Some(address), Some(token)) = (control["url"].as_str(), control["token"].as_str()) {
+                if url::Url::parse(address).is_ok_and(|url| url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.path() == "/cancel" && url.username().is_empty() && url.password().is_none()) {
+                    let _ = ureq::post(address).timeout(Duration::from_secs(3)).set("Authorization", &format!("Bearer {token}")).send_string("");
+                }
+            }
+        }
     }
-    result.media_url()
+    outcome.map_err(|mut error| { error.message = error.message.replace(key, "[REDACTED_SECRET]"); error })
 }
 
 pub fn download(
@@ -329,6 +416,18 @@ pub fn download(
     destination: &Path,
     cancel: &AtomicBool,
 ) -> Result<PathBuf> {
+    if url.starts_with("data:image/") {
+        let (header, encoded) = url.split_once(",").ok_or_else(|| Error::new("invalid_media", "内嵌图片格式无效"))?;
+        let extension = match header { "data:image/png;base64"=>"png", "data:image/jpeg;base64"=>"jpg", "data:image/webp;base64"=>"webp", _=>return Err(Error::new("invalid_media", "内嵌图片类型不支持")) };
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|_| Error::new("invalid_media", "内嵌图片编码无效"))?;
+        if bytes.is_empty() || bytes.len() > 32*1024*1024 { return Err(Error::new("invalid_media", "图片为空或超过 32 MiB")); }
+        if cancel.load(Ordering::SeqCst) { return Err(Error::new("cancelled", "图片保存已取消")); }
+        reference_magic(&bytes)?;
+        let target = destination.with_extension(extension);
+        std::fs::create_dir_all(target.parent().ok_or_else(|| Error::new("invalid_media", "目标路径无效"))?)?;
+        std::fs::write(&target, bytes)?;
+        return Ok(target);
+    }
     let base = base_url(&connection.base_url)?;
     let base_uri =
         url::Url::parse(&base).map_err(|_| Error::new("invalid_request", "服务地址无效"))?;
@@ -468,4 +567,9 @@ fn private_ip(address: std::net::IpAddr) -> bool {
                 || ip.to_ipv4_mapped().is_some_and(|ip| private_ip(ip.into()))
         }
     }
+}
+
+fn reference_magic(bytes: &[u8]) -> Result<()> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") || bytes.starts_with(b"\xff\xd8\xff") || (bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP")) { Ok(()) }
+    else { Err(Error::new("invalid_media", "返回的内容不是有效图片")) }
 }

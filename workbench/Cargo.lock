@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "cutflow-workbench"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64 0.22.1",
  "bdl-core",
@@ -452,6 +452,7 @@ dependencies = [
  "concat-project",
  "cutflow-download",
  "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

@@ -669,6 +669,7 @@ pub async fn selection_estimate_size(
             &settings,
         )?;
     }
+    apply_request_quality(&mut options, request.quality.as_deref(), request.missing_quality_policy.as_deref(), request.media_preferences.as_ref())?;
     let source_id = SourceId(request.source_id);
     let selected_part_ids = request.part_ids.into_iter().map(PartId).collect::<Vec<_>>();
     let prepared = state
@@ -682,6 +683,27 @@ pub async fn selection_estimate_size(
         &prepared.part_ids,
         &options,
     )?)
+}
+
+
+fn apply_request_quality(
+    options: &mut DownloadOptions, quality: Option<&str>, missing: Option<&str>,
+    preferences: Option<&bdl_core::media_preferences::MediaPreferences>,
+) -> CommandResult<()> {
+    if !matches!(options.media_mode, DownloadMediaMode::AudioVideo | DownloadMediaMode::VideoOnly) { return Ok(()); }
+    if let Some(quality) = quality {
+        options.video_quality = StreamPreference::parse_video(quality)?;
+        options.media_preferences.video = preferences.map(|p| p.video.clone()).unwrap_or_default();
+        if let Some(preferences) = preferences { options.media_preferences.fallback = preferences.fallback; }
+        if let Some(missing) = missing { options.missing_quality_policy = MissingQualityPolicy::parse(missing)?; }
+        options.media_preferences.validate()?;
+        if let Some(workflow) = options.workflow.as_mut() {
+            workflow.quality = quality.into();
+            workflow.media_preferences = options.media_preferences.clone();
+            if let Some(missing) = missing { workflow.missing_quality_policy = missing.into(); }
+        }
+    }
+    Ok(())
 }
 
 fn download_options_from_request(
@@ -735,6 +757,7 @@ fn download_options_from_request(
             .duplicate_naming_strategy
             .unwrap_or(settings.duplicate_naming_strategy);
         bdl_core::naming::validate_template(&options.naming_template)?;
+        apply_request_quality(&mut options, request.quality.as_deref(), request.missing_quality_policy.as_deref(), request.media_preferences.as_ref())?;
         return Ok(options);
     }
     let media_mode = request
@@ -2604,6 +2627,23 @@ mod tests {
         DownloadTaskMediaSelection, QueueLogEntry, QueueLogLevel, ResourceStatus, TaskStatus,
     };
     use chrono::{TimeZone, Utc};
+
+    #[test]
+    fn one_time_quality_overrides_preset_without_changing_saved_workflow() {
+        let settings = super::SettingsSnapshot::default().normalized();
+        let preset = settings.download_presets.iter().find(|p| p.workflow.video.enabled).unwrap();
+        let original = serde_json::to_string(&preset.workflow).unwrap();
+        let request: super::SelectionCreateTasksRequest = serde_json::from_value(serde_json::json!({
+            "source_id":"test", "part_ids":[], "download_preset_id":preset.id,
+            "quality":"127", "missing_quality_policy":"skip",
+            "media_preferences":{"video":[],"audio":[],"fallback":"error"}
+        })).unwrap();
+        let options = super::download_options_from_request(&request, &settings, None).unwrap();
+        assert_eq!(options.workflow.as_ref().unwrap().quality, "127");
+        assert!(options.media_preferences.video.is_empty());
+        assert_eq!(options.workflow.as_ref().unwrap().missing_quality_policy, "skip");
+        assert_eq!(serde_json::to_string(&preset.workflow).unwrap(), original);
+    }
 
     #[test]
     fn saved_preset_is_authoritative_and_options_own_an_immutable_snapshot() {

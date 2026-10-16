@@ -480,3 +480,99 @@ fn local_assets_are_project_owned_and_reimports_do_not_duplicate() {
     assert!(cutflow_workbench::media::copy_into_project(&project,&project.join("assets/local"),&source).is_err());
     assert_eq!(std::fs::read(&source).unwrap(),b"media-fixture");
 }
+
+
+#[test]
+fn cancellation_interrupts_a_provider_that_sends_no_bytes() {
+    use std::{sync::atomic::Ordering, time::{Duration, Instant}};
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let connection = Connection { base_url: format!("http://{}/v1", listener.local_addr().unwrap()) };
+    let cancel = Arc::new(AtomicBool::new(false));
+    let server_cancel = cancel.clone();
+    let server = std::thread::spawn(move || {
+        let (_socket, _) = listener.accept().unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        server_cancel.store(true, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(300));
+    });
+    let began = Instant::now();
+    let error = flow::generate(&connection, "secret", &json!({"model":"custom","prompt":"test"}), &cancel, |_| {}).unwrap_err();
+    assert_eq!(error.code, "cancelled");
+    assert!(began.elapsed() < Duration::from_secs(1));
+    server.join().unwrap();
+}
+
+#[test]
+fn generation_options_reach_the_provider_and_text_models_are_separate() {
+    let (connection, server) = mock(200, "application/json", json!({"url":"https://cdn.example/a.png"}).to_string());
+    flow::generate(&connection, "secret", &json!({"model":"gflow-nano-banana-2.1","prompt":"test","aspect_ratio":"3:4","image_size":"4K","stream":false}), &AtomicBool::new(false), |_| {}).unwrap();
+    let raw = server.join().unwrap();
+    let body: serde_json::Value = serde_json::from_str(raw.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(body["generationConfig"]["imageConfig"]["aspectRatio"], "3:4");
+    assert_eq!(body["generationConfig"]["imageConfig"]["imageSize"], "4K");
+    assert_eq!(flow::describe("gflow-omni-1.1-flash", "").kind, "video");
+    assert_eq!(flow::describe("gpt-6-luna", "").kind, "text");
+}
+
+#[test]
+fn inline_generated_images_can_be_saved_and_validated() {
+    use base64::Engine;
+    let root = scratch();
+    let bytes = b"\x89PNG\r\n\x1a\nfixture";
+    let url = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes));
+    let path = flow::download(&Connection { base_url:"http://localhost/v1".into() }, &url, &root.join("image.bin"), &AtomicBool::new(false)).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let mut result = StreamResult::default();
+    result.event(&json!({"data":[{"b64_json":base64::engine::general_purpose::STANDARD.encode(bytes)}]}).to_string()).unwrap();
+    assert_eq!(result.media_url().unwrap(), url);
+}
+
+#[test]
+fn model_listing_is_not_treated_as_verified_response() {
+    let (connection, server) = mock(200, "application/json", json!({"choices":[{"message":{"content":"OK"}}]}).to_string());
+    let result = flow::check_response(&connection, "secret", "gpt-6-luna").unwrap();
+    assert_eq!(result["verified"], true);
+    assert!(server.join().unwrap().starts_with("POST /v1/chat/completions"));
+    let (connection, server) = mock(200, "application/json", json!({"data":[{"id":"gpt-6-luna"}]}).to_string());
+    assert!(flow::check_response(&connection, "secret", "gpt-6-luna").is_err());
+    server.join().unwrap();
+}
+
+
+#[test]
+fn openai_images_use_the_image_endpoint_and_reference_edits_use_multipart() {
+    let (connection, server) = mock(200, "application/json", json!({"data":[{"url":"https://cdn.example/image.png"}]}).to_string());
+    flow::generate(&connection, "key", &json!({"model":"gpt-image-1.5","prompt":"circle","aspect_ratio":"1:1","image_size":"low"}), &AtomicBool::new(false), |_| {}).unwrap();
+    let request = server.join().unwrap();
+    assert!(request.starts_with("POST /v1/images/generations"));
+    assert!(request.contains("\"quality\":\"low\""));
+    let root = scratch();
+    let reference = root.join("reference.png");
+    std::fs::write(&reference, b"\x89PNG\r\n\x1a\nfixture").unwrap();
+    let (connection, server) = mock(200, "application/json", json!({"data":[{"url":"https://cdn.example/image.png"}]}).to_string());
+    flow::generate(&connection, "key", &json!({"model":"gpt-image-1.5","prompt":"circle","references":[reference]}), &AtomicBool::new(false), |_| {}).unwrap();
+    let request = server.join().unwrap();
+    assert!(request.starts_with("POST /v1/images/edits"));
+    assert!(request.contains("multipart/form-data"));
+    assert!(request.contains("name=\"image[]\""));
+}
+
+#[test]
+fn download_retry_requires_an_unsaved_captured_media_result() {
+    let root = scratch();
+    let runtime = Runtime::open(root.clone(), root.join("tools")).unwrap();
+    let (job, _, _) = runtime.reserve("cutflow.generate", json!({
+        "operationId":"retry-eligibility","kind":"image","model":"custom","prompt":"test","maxGenerationCalls":1
+    })).unwrap();
+    runtime.finish(&job.id, Err(cutflow_workbench::Error::new("captcha_failed", "No token")));
+    assert_eq!(runtime.snapshot()["jobs"][0]["canRetryDownload"], false);
+    let folder = root.join("generated").join(&job.id);
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("generation-result.json"), br#"{"urls":["https://cdn.example/image.png"]}"#).unwrap();
+    assert_eq!(runtime.snapshot()["jobs"][0]["canRetryDownload"], true);
+    let image = folder.join("generated-0.png");
+    std::fs::write(&image, b"saved").unwrap();
+    runtime.store.lock().unwrap().jobs[0].result = Some(json!({"assets":[{"path":image}]}));
+    assert_eq!(runtime.snapshot()["jobs"][0]["canRetryDownload"], false);
+    assert!(runtime.dispatch("cutflow.jobs.retryDownload", json!({"jobId":job.id})).is_err());
+}

@@ -8,3 +8,5 @@ bdl-state.json
 .build/
 **/__pycache__/
 **/portable/
+docs/verification-*/
+docs/清理记录.json

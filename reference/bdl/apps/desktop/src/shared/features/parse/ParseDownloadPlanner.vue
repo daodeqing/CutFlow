@@ -8,7 +8,7 @@ import { useParseStore } from '../../stores/parse'
 import { validateNamingTemplate, useSettingsStore } from '../../stores/settings'
 import type { InlineNotice } from '../../stores/feedback'
 import { statusBadge, statusLabel } from '../../stores/transferView'
-import { duplicateNamingOptions } from '../settings/settingsCatalog'
+import { duplicateNamingOptions, videoQualityOptions, missingQualityOptions } from '../settings/settingsCatalog'
 import NamingTemplatePicker from '../../ui/NamingTemplatePicker.vue'
 import UiTabs from '../../ui/Tabs.vue'
 import { isAndroidPlatform, isMobilePlatform } from '../../platform/environment'
@@ -35,6 +35,8 @@ const downloadDir = ref('')
 const documentTreeOutput = ref<DocumentTreeDirectory | null>(null)
 const rememberDocumentTreeOutput = ref(false)
 const downloadPresetId = ref('')
+const downloadQuality = ref('best')
+const missingQuality = ref<SettingsSnapshot['missing_quality_policy']>('lower')
 const selectedPreset = computed(() => settings.saved.download_presets.find((preset) => preset.id === downloadPresetId.value))
 const effectiveOutputExtension = computed(() => selectedPreset.value ? workflowExtension(selectedPreset.value.workflow) : 'mp4')
 const outputPreview = computed(() => selectedPreset.value ? workflowOutputs(selectedPreset.value.workflow) : [])
@@ -102,6 +104,7 @@ const refreshSizeEstimate = async () => {
   try {
     const estimate = await parse.estimateDownloadSizeForSources(selectedSourceIds.value, {
       downloadPresetId: downloadPresetId.value,
+      quality: downloadQuality.value, missingQualityPolicy: missingQuality.value, mediaPreferences: { video: [], audio: [], fallback: missingQuality.value === 'lower' ? 'best' : 'error' },
     })
     if (revision === sizeEstimateRevision) sizeEstimate.value = estimate
   } catch {
@@ -111,7 +114,7 @@ const refreshSizeEstimate = async () => {
   }
 }
 watch(
-  [downloadDialogOpen, downloadPresetId],
+  [downloadDialogOpen, downloadPresetId, downloadQuality, missingQuality],
   () => {
     if (downloadDialogOpen.value) void refreshSizeEstimate()
   },
@@ -119,6 +122,7 @@ watch(
 )
 const restoreDefaults = () => {
   defaultsRevision.value += 1
+  downloadQuality.value = 'best'; missingQuality.value = 'lower'
   const defaults = settings.saved
   downloadDir.value = defaults.download_dir ?? ''
   documentTreeOutput.value = defaults.document_tree_output ? { ...defaults.document_tree_output } : null
@@ -184,6 +188,7 @@ const createTasks = async (duplicatePolicy: DuplicateTaskPolicy = 'ask') => {
     downloadDir: isMobilePlatform() ? null : downloadDir.value.trim() || 'downloads',
     documentTreeOutput: isMobilePlatform() ? documentTreeOutput.value : null,
     downloadPresetId: downloadPresetId.value,
+    quality: downloadQuality.value, missingQualityPolicy: missingQuality.value, mediaPreferences: { video: [], audio: [], fallback: missingQuality.value === 'lower' ? 'best' : 'error' },
     namingTemplate: namingTemplate.value,
     duplicateNamingStrategy: duplicateNamingStrategy.value,
     duplicatePolicy,
@@ -260,6 +265,8 @@ const chooseDocumentTreeOutput = async () => {
       <div class="grid content-start gap-4">
         <div v-show="activeTab === 'general'" class="grid gap-4">
           <UiSelect v-model="downloadPresetId" label="下载预设" :options="settings.saved.download_presets.map((preset) => ({ label: preset.name, value: preset.id }))" :disabled="activeLoading" helper="在设置 → 下载预设中新增或修改，自动记住上次选择" />
+          <UiSelect v-model="downloadQuality" label="本次下载画质" :options="videoQualityOptions" :disabled="activeLoading" helper="最优画质选择当前账号可下载的最高原视频画质，支持 8K、4K、HDR；不会放大低清源。" />
+          <UiSelect v-model="missingQuality" label="目标画质不可用时" :options="missingQualityOptions" :disabled="activeLoading" />
           <div class="grid gap-2 rounded-lg border border-(--color-border) p-3" aria-label="本次输出预览">
             <strong class="text-sm">将生成</strong>
             <ul class="m-0 grid list-none gap-1 p-0 text-sm"><li v-for="item in outputPreview" :key="item">{{ item }}</li></ul>

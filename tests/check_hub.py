@@ -1,4 +1,5 @@
 import argparse
+import base64
 from collections import Counter
 import ctypes
 from ctypes import wintypes
@@ -72,10 +73,14 @@ def verify(stage):
 
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-            assert self.path == '/v1/chat/completions'
+            assert self.path in ['/v1/chat/completions', '/v1/images/generations']
             assert self.headers.get('Authorization') == 'Bearer cutflow-smoke-key'
             model = payload['model']
             posts[model] += 1
+            if self.path == '/v1/images/generations':
+                assert payload['n'] == 1 and payload['size'] == '1024x1024' and payload['quality'] == 'low'
+                self.send(200, 'application/json', json.dumps({'data':[{'b64_json':base64.b64encode((fixtures/'image.png').read_bytes()).decode()}]}).encode())
+                return
             if model == 'quota':
                 self.send(402, 'application/json', b'{"error":{"code":"insufficient_quota"}}')
                 return
@@ -154,6 +159,10 @@ def verify(stage):
                     call('cutflow.jobs.retryDownload', {'jobId': submitted['jobId']})
                     complete(submitted['jobId'])
                     assert posts[model] == 1
+            submitted = call('cutflow.generate', {'operationId':run_id+'-multi-image', 'kind':'image', 'model':'gpt-image-1.5', 'prompt':'fixture', 'n':4, 'maxGenerationCalls':4, 'aspect_ratio':'1:1', 'image_size':'low'})
+            images = complete(submitted['jobId'])['result']['assets']
+            assert len(images) == 4 and len(set(image['path'] for image in images)) == 4
+            assert posts['gpt-image-1.5'] == 4
             assert posts['custom-image'] == 1 and posts['broken-stream'] == 1
             assert authorized_media and all(value is None for value in authorized_media)
             if (stage / 'CutFlow-editor.exe').is_file():
@@ -178,7 +187,7 @@ def verify(stage):
                         user32.PostMessageW(window, 0x0010, 0, 0)
                     return True
                 user32.EnumWindows(close_editor, 0)
-            print('PASS: mock OpenAI models, reference upload, image/video, no-project generation, replay, broken stream, quota, download-only retry, no leaked media key; ' + ('independent editor verified' if editor else 'editor check deferred: binary not present in this stage'))
+            print('PASS: mock OpenAI models, reference upload, image/video, four image API outputs, no-project generation, replay, broken stream, quota, download-only retry, no leaked media key; ' + ('independent editor verified' if editor else 'editor check deferred: binary not present in this stage'))
         finally:
             if hub.poll() is None:
                 hub.terminate()

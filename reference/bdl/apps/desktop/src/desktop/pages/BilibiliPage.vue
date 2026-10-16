@@ -22,7 +22,7 @@ const tabs = computed(() => [
   <div class="bilibili-workspace">
     <header class="bilibili-heading">
       <UiTabs v-model="selected" :tabs="tabs" />
-      <p>登录账号后获取实际可用画质。严格 4K 请选择「4K / 120」和「阻止创建任务」；会员也可能遇到无 4K 的视频。</p>
+      <p>开始下载前可选择画质，默认获取当前账号可用的最高原视频画质；支持 8K、4K 和 HDR，实际可用范围取决于原视频与账号权限。</p>
     </header>
     <KeepAlive><component :is="pages[ui.bilibiliSubTab]" /></KeepAlive>
   </div>

@@ -5,7 +5,7 @@ export interface AiModel { id: string; description: string; kind: string; maxRef
 export interface Asset { path: string; width?: number; height?: number; duration?: number; hasAudio?: boolean }
 export interface Job {
   id: string; operationId: string; method: string; params: Record<string, unknown>; status: string; stage: string
-  result?: { assets?: Asset[]; thumbnail?: string } | null; error?: CutflowError | null
+  canRetryDownload?: boolean; result?: { assets?: Asset[]; thumbnail?: string } | null; error?: CutflowError | null
 }
 export interface Reference { id: string; kind: string; name: string; path: string; prompt: string }
 export interface HubSnapshot { connection: { baseUrl: string }; models: AiModel[]; references: Reference[]; jobs: Job[]; fault: string | null }
