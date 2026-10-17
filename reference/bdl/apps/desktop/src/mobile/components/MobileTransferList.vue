@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiProgressBar from '../../shared/ui/ProgressBar.vue';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { TaskActionKind, TransferTaskView } from '../../shared/stores/transferView';
 import { calculateVirtualWindow } from '../../shared/utils/virtualWindow';
@@ -144,6 +145,9 @@ const taskMetaLabel = (view: TransferTaskView) =>
   view.isCompleted
     ? [rowHeight.value < 62 ? view.statusLabel : '', view.subtitle || view.shortLocation].filter(Boolean).join(' · ')
     : view.statusLabel;
+// 移动端文字显示当前下载阶段；进度条沿用同一数值，避免总进度与音视频阶段混淆。
+const taskProgressValue = (view: TransferTaskView) =>
+  view.stageProgressLabel ? Number.parseFloat(view.stageProgressLabel) : view.progressValue;
 const taskMetaValue = (view: TransferTaskView) => {
   if (!view.isCompleted) {
     return [view.speedLabel === '--' ? '' : view.speedLabel, view.stageProgressLabel ?? view.progressLabel]
@@ -191,6 +195,7 @@ const taskMetaValue = (view: TransferTaskView) => {
             @update:model-value="emit('toggleTaskSelection', view.id)"
           />
           <div class="task-artwork-wrap">
+            <UiProgressBar v-if="!view.isCompleted" class="mobile-liquid-progress" :value="taskProgressValue(view)" :status="view.statusBadge" :label="view.displayTitle + ' · ' + view.statusLabel" />
             <MediaArtwork
               class="task-artwork"
               :src="artwork.get(view.id)?.src"
@@ -450,4 +455,9 @@ const taskMetaValue = (view: TransferTaskView) => {
   border-radius: 50%;
   background: rgb(17 24 39 / 72%);
 }
+</style>
+
+<style scoped>
+.task-artwork-wrap { position: relative; }
+.mobile-liquid-progress { position: absolute; inset: auto 2px 1px; z-index: 1; width: calc(100% - 4px); height: 4px; pointer-events: none; }
 </style>

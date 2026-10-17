@@ -3871,3 +3871,176 @@ test.describe('CutFlow 0.5 compact creation', () => {
     });
   });
 });
+
+
+test.describe('Wabi liquid glass acceptance', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    test(theme + ' optical controls, task flow and reduced motion', async ({ page }, testInfo) => {
+      const errors: string[] = [];
+      page.on('pageerror', error => errors.push(error.message));
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await installTauriMock(page, theme, true, true);
+      await page.addInitScript(() => {
+        const target = window as unknown as {
+          __TAURI_INTERNALS__: {
+            invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+            transformCallback: (callback: (event: unknown) => void) => number;
+          };
+          __WABI_EMIT__: (event: string, payload: unknown) => void;
+        };
+        const callbacks = new Map<number, (event: unknown) => void>();
+        const listeners = new Map<string, number>();
+        let id = 5000;
+        target.__TAURI_INTERNALS__.transformCallback = callback => { callbacks.set(++id, callback); return id; };
+        target.__WABI_EMIT__ = (event, payload) => callbacks.get(listeners.get(event) ?? -1)?.({ event, id: listeners.get(event), payload });
+        const invoke = target.__TAURI_INTERNALS__.invoke;
+        const cover = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"><defs><linearGradient id="g"><stop stop-color="#103337"/><stop offset="1" stop-color="#0b0f12"/></linearGradient></defs><rect width="480" height="270" fill="url(#g)"/><path d="M20 240 165 50 310 240Z" fill="#0d7a68"/><path d="M170 240 310 80 450 240Z" fill="#2dd4bf" opacity=".45"/><circle cx="385" cy="55" r="22" fill="#5eead4"/></svg>');
+        target.__TAURI_INTERNALS__.invoke = async (command, args) => {
+          if (command === 'plugin:app|version') return '0.5.0';
+          if (command === 'plugin:event|listen') { listeners.set(args?.event as string, args?.handler as number); return id++; }
+          if (command === 'queue_list') return ['downloading', 'paused', 'failed', 'waiting', 'completed'].map((status, index) => ({
+            id: 'wabi-' + index, title: ['光影之间 · 城市与远方 4K', '剪辑节奏与声音设计', '需重新解析的视频素材', '定时工作队列 · 下一段旅程', '已完成 · 玻璃建筑素材集'][index],
+            source_id: 'video:fixture', status, output_path: 'D:/CutFlow/downloads/sample-' + index + '.mp4',
+            resources: [{ id: 'video', intent: 'video', status: status === 'completed' ? 'completed' : 'downloading', current_urls: [], target_path: 'D:/CutFlow/downloads/sample-' + index + '.m4s' }],
+            refresh_intent: { input: { kind: 'video_bvid', bvid: 'BV1xx411c7mD' }, cid: index + 1, cover_url: cover, duration_seconds: 868 },
+            media_selection: { video_quality: '120', audio_quality: 'best', video_codec: 'avc', container: 'mp4' }, scheduled_at: null, speed_limit_bytes_per_second: null,
+          }));
+          if (command === 'queue_logs') return [];
+          if (command === 'queue_output_sizes') return { 'wabi-4': 671088640 };
+          if (command === 'cutflow_call') {
+            if (args?.method === 'cutflow.editor.status') return { running: false };
+            if (args?.method === 'cutflow.editor.recents') return [];
+            return { connection: {}, models: [], references: [], jobs: [], fault: null };
+          }
+          return invoke(command, args);
+        };
+      });
+      await page.goto('/');
+      await page.getByRole('tab', { name: /下载队列/ }).click();
+      await page.getByRole('tab', { name: /^全部/ }).click();
+      await expect(page.locator('.task-table-row')).toHaveCount(5);
+      await page.evaluate(() => {
+        const emit = (window as unknown as { __WABI_EMIT__: (event: string, payload: unknown) => void }).__WABI_EMIT__;
+        for (let i = 0; i < 4; i++) emit('queue://progress-updated', { task_id: 'wabi-' + i, resource_id: 'video', downloaded_bytes: 68, total_bytes: 100, created_at: new Date().toISOString() });
+      });
+      const active = page.locator('.task-table-row').filter({ hasText: '光影之间' }).getByRole('progressbar');
+      await expect(active).toHaveAttribute('aria-valuenow', '68');
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      const fill = active.locator('.progress-fill');
+      await expect(fill).toHaveCSS('animation-name', /^wabi-liquid-flow/);
+      const before = await fill.evaluate(el => getComputedStyle(el).backgroundPosition);
+      await expect.poll(() => fill.evaluate(el => getComputedStyle(el).backgroundPosition)).not.toBe(before);
+      const flowing = await fill.boundingBox();
+      const track = await active.boundingBox();
+      expect(flowing!.width / track!.width).toBeCloseTo(.68, 1);
+      await expect(page.locator('.progress-track[data-status="paused"]')).not.toHaveClass(/is-flowing/);
+      await expect(page.locator('.progress-track[data-status="error"]')).not.toHaveClass(/is-flowing/);
+      await expect(page.locator('.progress-track[data-status="queued"]')).not.toHaveClass(/is-flowing/);
+      await page.screenshot({ path: testInfo.outputPath('wabi-queue-' + theme + '.png') });
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await expect(fill).toHaveCSS('animation-name', 'none');
+      expect(await fill.evaluate(el => getComputedStyle(el, '::after').animationName)).toBe('none');
+      await page.getByRole('button', { name: '收起导航', exact: true }).click();
+      await expect(page.locator('.app-shell')).toHaveClass(/nav-collapsed/);
+      await page.getByRole('button', { name: '展开导航', exact: true }).click();
+      await expect(page.locator('.app-shell')).not.toHaveClass(/nav-collapsed/);
+      await page.getByRole('button', { name: 'Wabi 液体玻璃方案与样例图', exact: true }).click();
+      const modal = page.getByRole('dialog', { name: 'Wabi 液体玻璃方案与样例图', exact: true });
+      await expect(modal).toBeVisible();
+      const slider = page.getByLabel('折射位移强度');
+      await slider.fill('32');
+      await expect(page.locator('#wabi-liquid-refract feDisplacementMap')).toHaveAttribute('scale', '32');
+      await slider.fill('0');
+      await expect(page.locator('#wabi-liquid-refract feDisplacementMap')).toHaveAttribute('scale', '0');
+      await slider.fill('14');
+      await page.getByRole('button', { name: '下载队列与诊断', exact: true }).click();
+      await expect(page.locator('.wabi-sample img')).toHaveAttribute('alt', /下载队列与诊断/);
+      await modal.locator('[data-slot="body"]').evaluate(el => { el.scrollTop = 0; });
+      await page.screenshot({ path: testInfo.outputPath('wabi-spec-' + theme + '.png'), animations: 'disabled' });
+      await page.keyboard.press('Escape');
+      await expect(modal).toBeHidden();
+      await expect(page.getByRole('button', { name: 'Wabi 液体玻璃方案与样例图', exact: true })).toBeFocused();
+      await page.keyboard.press('Control+4');
+      await expect(page.locator('.settings-panel')).toBeVisible();
+      await expect(page.locator('.main-region > .workspace-enter-active, .main-region > .workspace-leave-active')).toHaveCount(0);
+      await page.screenshot({ path: testInfo.outputPath('wabi-settings-' + theme + '.png'), animations: 'disabled' });
+      await page.keyboard.press('Control+2');
+      await expect(page.locator('.editor-launch')).toBeVisible();
+      await expect(page.locator('.main-region > .workspace-enter-active, .main-region > .workspace-leave-active')).toHaveCount(0);
+      await page.screenshot({ path: testInfo.outputPath('wabi-editor-' + theme + '.png'), animations: 'disabled' });
+      expect(errors).toEqual([]);
+    });
+    test(theme + ' narrow desktop keeps optical controls reachable', async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await installTauriMock(page, theme, true, true);
+      await page.goto('/');
+      const trigger = page.getByRole('button', { name: 'Wabi 液体玻璃方案与样例图', exact: true });
+      await expect(trigger).toBeInViewport();
+      await trigger.click();
+      await expect(page.getByLabel('折射位移强度')).toBeInViewport();
+      const rect = await page.getByRole('dialog', { name: 'Wabi 液体玻璃方案与样例图', exact: true }).boundingBox();
+      expect(rect!.x).toBeGreaterThanOrEqual(0);
+      expect(rect!.x + rect!.width).toBeLessThanOrEqual(390);
+      await page.screenshot({ path: testInfo.outputPath('wabi-narrow-' + theme + '.png'), animations: 'disabled' });
+      await page.keyboard.press('Escape');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+    });
+  }
+});
+
+test.describe('Wabi mobile progress', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    test(theme + ' phone preserves task status and liquid progress on rotation', async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.addInitScript(() => Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 (Linux; Android 12) Mobile' }));
+      await installTauriMock(page, theme, true, true);
+      await page.addInitScript(() => {
+        const target = window as unknown as {
+          __TAURI_INTERNALS__: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>; transformCallback: (callback: (event: unknown) => void) => number };
+          __WABI_MOBILE_EMIT__: (event: string, payload: unknown) => void;
+        };
+        const runtime = target.__TAURI_INTERNALS__;
+        const callbacks = new Map<number, (event: unknown) => void>();
+        const listeners = new Map<string, number>();
+        let id = 7000;
+        runtime.transformCallback = callback => { callbacks.set(++id, callback); return id; };
+        target.__WABI_MOBILE_EMIT__ = (event, payload) => callbacks.get(listeners.get(event) ?? -1)?.({ event, id: listeners.get(event), payload });
+        const original = runtime.invoke;
+        runtime.invoke = async (command, args) => {
+          if (command === 'plugin:event|listen') { listeners.set(args?.event as string, args?.handler as number); return id++; }
+          if (command === 'queue_list') return ['downloading', 'paused', 'failed'].map((status, index) => ({
+            id: 'mobile-wabi-' + index, title: ['下载中的光影素材', '已暂停的光影素材', '需要处理的光影素材'][index],
+            source_id: 'video:fixture', status, output_path: 'downloads/sample.mp4', refresh_intent: null, media_selection: null,
+            scheduled_at: null, speed_limit_bytes_per_second: null,
+            resources: [{ id: 'video', intent: 'video', status: 'completed', current_urls: [], target_path: 'downloads/sample.m4s' },
+              { id: 'audio', intent: 'audio', status: 'downloading', current_urls: [], target_path: 'downloads/sample.m4a' }],
+          }));
+          if (command === 'queue_logs') return [];
+          return original(command, args);
+        };
+      });
+      await page.goto('/');
+      await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: /传输/ }).click();
+      const active = page.locator('.mobile-liquid-progress[data-status="downloading"]');
+      await expect(active).toBeVisible();
+      await expect(active).toHaveAttribute('aria-valuenow', '0');
+      await page.evaluate(() => {
+        (window as unknown as { __WABI_MOBILE_EMIT__: (event: string, payload: unknown) => void }).__WABI_MOBILE_EMIT__('queue://progress-updated', {
+          task_id: 'mobile-wabi-0', resource_id: 'audio', downloaded_bytes: 50, total_bytes: 100, created_at: new Date().toISOString(),
+        });
+      });
+      await expect(active).toHaveAttribute('aria-valuenow', '50');
+      await expect(page.locator('.mobile-task').filter({ hasText: '下载中的光影素材' }).locator('.task-meta')).toContainText('50%');
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await expect(active.locator('.progress-fill')).toHaveCSS('animation-name', /^wabi-liquid-flow/);
+      await expect(page.locator('.mobile-liquid-progress[data-status="paused"]')).not.toHaveClass(/is-flowing/);
+      await page.screenshot({ path: testInfo.outputPath('wabi-phone-' + theme + '.png') });
+      await page.setViewportSize({ width: 844, height: 390 });
+      await expect(active).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(844);
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await expect(active.locator('.progress-fill')).toHaveCSS('animation-name', 'none');
+      await page.screenshot({ path: testInfo.outputPath('wabi-phone-landscape-' + theme + '.png'), animations: 'disabled' });
+    });
+  }
+});

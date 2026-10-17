@@ -3,7 +3,7 @@
 
 :root {
   color-scheme: light;
-  --color-background: #f4f6f7;
+  --color-background: #e8eff0;
   --color-surface: #ffffff;
   --color-surface-raised: #ffffff;
   --color-inset: #eef2f3;
@@ -17,11 +17,11 @@
   --color-muted: #596b74;
   --color-text-muted: var(--color-muted);
   --color-dimmed: #71828a;
-  --color-accent: #0f766e;
-  --color-accent-strong: #0a615a;
+  --color-accent: #0d7a68;
+  --color-accent-strong: #0b6959;
   --color-accent-soft: #c8ebe5;
   --color-accent-faint: #e9f5f2;
-  --color-focus-outline: #0f766e;
+  --color-focus-outline: #0d7a68;
   --color-on-accent: #ffffff;
   --color-on-danger: #ffffff;
   --color-danger: #b73535;
@@ -71,8 +71,8 @@
   --height-topbar: 4rem;
   --shadow-panel: 0 0.0625rem 0.125rem oklch(0.2 0.006 260 / 5%);
   --shadow-overlay: 0 1.125rem 3.125rem oklch(0.16 0.006 260 / 18%);
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --duration-fast: 140ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 160ms;
   --duration-base: 180ms;
   --z-content: 1;
   --z-sticky: 10;
@@ -84,7 +84,7 @@
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --color-background: #14191e;
+  --color-background: #0b0f12;
   --color-surface: #1d252b;
   --color-surface-raised: #28333b;
   --color-inset: #172026;
@@ -98,11 +98,11 @@
   --color-muted: #abbcc5;
   --color-text-muted: var(--color-muted);
   --color-dimmed: #879ca7;
-  --color-accent: #4cdbbf;
+  --color-accent: #2dd4bf;
   --color-accent-strong: #81ead4;
   --color-accent-soft: #1d4a43;
   --color-accent-faint: #203b37;
-  --color-focus-outline: #4cdbbf;
+  --color-focus-outline: #2dd4bf;
   --color-on-accent: #102c27;
   --color-on-danger: #ffffff;
   --color-danger: #c44242;

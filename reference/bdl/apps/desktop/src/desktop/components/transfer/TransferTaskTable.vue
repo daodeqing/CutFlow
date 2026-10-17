@@ -115,7 +115,7 @@ const play = (view: TransferTaskView) => emit('taskAction', view.id, view.isComp
             <div class="task-detail-line">
               <UiStatusBadge :status="row.view.statusBadge">{{ row.view.statusLabel }}</UiStatusBadge>
               <template v-if="!row.view.isCompleted">
-                <UiProgressBar :value="row.view.progressValue" />
+                <UiProgressBar :value="row.view.progressValue" :status="row.view.statusBadge" :label="row.view.displayTitle + ' · ' + row.view.statusLabel" />
                 <span>{{ row.view.progressLabel }}</span>
                 <span v-if="row.view.speedLabel !== '--'">{{ row.view.speedLabel }}</span>
                 <span v-if="row.view.etaLabel !== '--'">剩余 {{ row.view.etaLabel }}</span>
@@ -206,9 +206,9 @@ const play = (view: TransferTaskView) => emit('taskAction', view.id, view.isComp
 }
 
 .task-detail-line :deep(.progress-track) {
-  width: 60px;
+  width: clamp(60px, 10vw, 176px);
   min-width: 30px;
-  height: 4px;
+  height: 6px;
 }
 
 .task-location,

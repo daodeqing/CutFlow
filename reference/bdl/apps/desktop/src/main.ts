@@ -12,6 +12,7 @@ import './shared/styles/tokens.css'
 import './shared/styles/feedback.css'
 import './shared/styles/forms.css'
 import './shared/styles/base.css'
+import './shared/styles/wabi.css'
 
 addCollection(localIcons)
 
