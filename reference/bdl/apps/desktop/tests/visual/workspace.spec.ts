@@ -3723,3 +3723,151 @@ test('desktop update notice remains separate from Android APK guidance', async (
   await expect(page.getByRole('button', { name: '下载 APK' })).toHaveCount(0);
   await expect(page.getByText('当前已是最新版本。')).toHaveCount(0);
 });
+
+
+test.describe('CutFlow 0.5 compact creation', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const size of [{ width: 1024, height: 680 }, { width: 1180, height: 760 }, { width: 1440, height: 900 }]) {
+      test(theme + ' ' + size.width + 'x' + size.height + ' keeps preview and composer together', async ({ page }, testInfo) => {
+        await page.setViewportSize(size);
+        await installTauriMock(page, theme, true, true);
+        await page.addInitScript(() => {
+          const runtime = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: { method?: string }) => Promise<unknown> } }).__TAURI_INTERNALS__;
+          const original = runtime.invoke;
+          const picture = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1376" height="768"><rect width="1376" height="768" fill="#d9e6e2"/><circle cx="960" cy="220" r="86" fill="#efd59c"/><path d="M0 650 410 270 850 768H0Z" fill="#426c68"/><path d="m520 768 450-420 406 420" fill="#204843"/></svg>');
+          const models = [
+            { id: 'gflow-nano-banana-2-lite', kind: 'image', maxReferences: 3 },
+            { id: 'gflow-nano-banana-2.1', kind: 'image', maxReferences: 3 },
+            { id: 'gflow-veo-3.1-lite', kind: 'video', maxReferences: 2 },
+            ...Array.from({ length: 16 }, (_, index) => ({ id: 'gflow-custom-long-model-name-for-scroll-and-overflow-' + index, kind: 'image', maxReferences: 3 })),
+          ];
+          runtime.invoke = async (command, args) => {
+            if (command === 'plugin:app|version') return '0.5.0';
+            if (command === 'cutflow_call') {
+              if (args?.method === 'cutflow.hub.snapshot') return {
+                connection: { baseUrl: 'http://127.0.0.1:8317/v1' }, models, references: [], fault: null,
+                jobs: Array.from({ length: 20 }, (_, index) => ({
+                  id: 'fixture-' + index, operationId: 'fixture-' + index, method: 'cutflow.generate', status: 'completed', stage: '已完成',
+                  params: { kind: 'image', model: 'gflow-nano-banana-2-lite', prompt: '海岸日落 ' + index, aspect_ratio: '16:9' },
+                  result: { assets: [{ path: picture, width: 1376, height: 768 }], thumbnail: picture },
+                })),
+              };
+              if (args?.method === 'cutflow.models.list') return { models };
+              return {};
+            }
+            return original(command, args);
+          };
+        });
+        await page.goto('/');
+        await page.getByRole('button', { name: 'AI 创作', exact: true }).click();
+        await expect(page.locator('.preview-stage img')).toBeVisible();
+        await page.locator('#ai-prompt').fill('一片安静的海岸，落日与柔和的光线');
+        for (const selector of ['#ai-prompt', '.composer-submit button', '.preview-stage img', '#ai-aspect', '#ai-image-size', '#ai-count']) {
+          const bounds = await page.locator(selector).boundingBox();
+          expect(bounds, selector).not.toBeNull();
+          expect(bounds!.y).toBeGreaterThanOrEqual(0);
+          expect(bounds!.y + bounds!.height, selector).toBeLessThanOrEqual(size.height);
+          expect(bounds!.x + bounds!.width, selector).toBeLessThanOrEqual(size.width);
+        }
+        expect(await page.locator('.creation-page').evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(size.width);
+        expect(await page.locator('.preview-stage img').evaluate(element => getComputedStyle(element).objectFit)).toBe('contain');
+        await page.screenshot({ path: testInfo.outputPath('creation-' + theme + '-' + size.width + '.png') });
+        await page.getByRole('button', { name: '历史作品 20', exact: true }).click();
+        await expect(page.getByRole('dialog', { name: '历史作品', exact: true })).toBeVisible();
+        await page.getByRole('button', { name: '海岸日落 0 Nano Banana 2 Lite · 已保存', exact: true }).click();
+        await expect(page.locator('.preview-stage img')).toHaveAttribute('alt', '海岸日落 0');
+        await page.waitForTimeout(1900);
+        await expect(page.locator('.preview-stage img')).toHaveAttribute('alt', '海岸日落 0');
+        await expect(page.locator('#ai-prompt')).toHaveValue('一片安静的海岸，落日与柔和的光线');
+        await page.locator('.model-trigger').click();
+        await expect(page.getByRole('dialog', { name: '选择模型', exact: true })).toBeVisible();
+        await page.locator('.model-options').hover(); await page.mouse.wheel(0, 400);
+        await expect(page.locator('.model-options')).toBeVisible();
+        await expect.poll(() => page.locator('.model-options').evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+        await page.keyboard.press('Escape');
+        await expect(page.locator('.model-trigger')).toBeFocused();
+        if (size.width === 1024) {
+          await page.keyboard.press('Control+4');
+          await expect(page.locator('.settings-panel')).toBeVisible();
+          await expect(page.locator('.main-region > .workspace-enter-active, .main-region > .workspace-leave-active')).toHaveCount(0);
+          await page.screenshot({ path: testInfo.outputPath('settings-' + theme + '.png'), animations: 'disabled' });
+          await page.getByRole('button', { name: '关于', exact: true }).click();
+          await expect(page.locator('.about-header')).toBeVisible();
+          await expect(page.locator('.main-region > .workspace-enter-active, .main-region > .workspace-leave-active')).toHaveCount(0);
+          await page.screenshot({ path: testInfo.outputPath('about-' + theme + '.png'), animations: 'disabled' });
+          await page.keyboard.press('Control+1');
+          await expect(page.locator('.bilibili-workspace')).toBeVisible();
+          await expect(page.locator('.main-region > .workspace-enter-active, .main-region > .workspace-leave-active')).toHaveCount(0);
+          await page.screenshot({ path: testInfo.outputPath('bilibili-' + theme + '.png'), animations: 'disabled' });
+        }
+      });
+    }
+  }
+  test('portrait partial results, long model and stopping stay within the small window', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1024, height: 680 });
+    await installTauriMock(page, 'dark', true, true);
+    await page.addInitScript(() => {
+      const runtime = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: { method?: string }) => Promise<unknown> } }).__TAURI_INTERNALS__;
+      const original = runtime.invoke;
+      const model = 'gflow-custom-long-model-name-with-a-capability-supplied-by-the-service';
+      const picture = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><rect width="720" height="1280" fill="#315956"/><circle cx="360" cy="420" r="160" fill="#cfe7e1"/></svg>');
+      Object.assign(window, { cutflowCancelCalls: 0 });
+      runtime.invoke = async (cmd, args) => {
+        if (cmd === 'cutflow_call') {
+          if (args?.method === 'cutflow.jobs.cancel') {
+            const state = window as unknown as { cutflowCancelCalls: number };
+            state.cutflowCancelCalls++;
+            return { message: '正在停止' };
+          }
+          return {
+            connection: { baseUrl: 'http://127.0.0.1/v1' },
+            models: [{ id: model, kind: 'image', maxReferences: 3 }], references: [], fault: null,
+            jobs: [{ id: 'partial', operationId: 'partial', method: 'cutflow.generate', status: 'running', stage: '已保存 4 张，等待任务结束',
+              params: { kind: 'image', model, prompt: '竖幅作品', aspect_ratio: '9:16' },
+              result: { assets: Array.from({ length: 4 }, () => ({ path: picture, width: 720, height: 1280 })), thumbnail: picture } }],
+          };
+        }
+        return original(cmd, args);
+      };
+    });
+    await page.goto('/');
+    await page.keyboard.press('Control+3');
+    await expect(page.locator('.preview-stage img')).toBeVisible();
+    await expect(page.locator('.main-region > .workspace-enter-active')).toHaveCount(0);
+    await page.getByRole('button', { name: '查看第 4 张', exact: true }).click();
+    await expect(page.getByRole('button', { name: '查看第 4 张', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await page.getByRole('button', { name: '停止生成', exact: true }).click();
+    await expect(page.getByRole('button', { name: '正在停止…', exact: true })).toBeDisabled();
+    for (const selector of ['.composer-options', '.composer-submit', '#ai-prompt', '.preview-stage img', '.asset-thumbnails']) {
+      const bounds = (await page.locator(selector).boundingBox())!;
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(680);
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(1024);
+    }
+    await page.getByRole('button', { name: '视频', exact: true }).click();
+    await expect(page.getByRole('button', { name: '正在停止…', exact: true })).toBeDisabled();
+    expect(await page.evaluate(() => (window as unknown as { cutflowCancelCalls: number }).cutflowCancelCalls)).toBe(1);
+    expect(await page.locator('.creation-page').evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('creation-portrait-stopping.png') });
+  });
+  test.describe('125 percent display scaling', () => {
+    test.use({ deviceScaleFactor: 1.25 });
+    test('1024 logical pixels retains controls', async ({ page }, testInfo) => {
+      await page.setViewportSize({ width: 1024, height: 680 });
+      await installTauriMock(page, 'dark', true, true);
+      await page.addInitScript(() => {
+        const runtime = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: { method?: string }) => Promise<unknown> } }).__TAURI_INTERNALS__;
+        const original = runtime.invoke;
+        runtime.invoke = async (cmd, args) => cmd === 'cutflow_call' ? {
+          connection: { baseUrl: 'http://127.0.0.1/v1' }, models: [], references: [], jobs: [], fault: null,
+        } : original(cmd, args);
+      });
+      await page.goto('/'); await page.getByRole('button', { name: 'AI 创作', exact: true }).click();
+      await expect(page.locator('#ai-prompt')).toBeVisible();
+      const bounds = (await page.locator('.composer-submit').boundingBox())!;
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(680);
+      expect(await page.locator('.creation-page').evaluate(element => element.scrollHeight <= element.clientHeight + 1)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath('creation-scale-125.png') });
+    });
+  });
+});

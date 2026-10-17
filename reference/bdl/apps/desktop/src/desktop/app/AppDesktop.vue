@@ -4,6 +4,7 @@ import { useAccountStore } from '../../shared/stores/account';
 import { useUiStore } from '../../shared/stores/ui';
 import { useUpdateStore } from '../../shared/stores/update';
 import { isMacPlatform } from '../../shared/platform/environment';
+import brandMark from '../../assets/cutflow-mark.svg';
 import AppearanceMenu from '../../shared/ui/AppearanceMenu.vue';
 import AppAccountMenu from './AppAccountMenu.vue';
 import { navItems, useNavigationStatus } from '../../shared/features/navigation';
@@ -27,7 +28,7 @@ const { transferBadgeCount, attentionCount, queueHealthLabel, aggregateSpeedLabe
   <main class="app-shell" :class="{ 'platform-macos': isMacOs }">
     <header class="app-titlebar" data-tauri-drag-region @dblclick="toggleMaximizeWindow">
       <div class="titlebar-brand" data-tauri-drag-region>
-        <span class="titlebar-mark" aria-hidden="true"><i></i><i></i></span>
+        <span class="titlebar-mark" aria-hidden="true"><img :src="brandMark" alt="" /></span>
         <strong data-tauri-drag-region>CutFlow</strong>
         <span class="titlebar-name" data-tauri-drag-region>素材 · 剪辑 · AI 创作</span>
         <span class="titlebar-version tabular-nums" data-tauri-drag-region>v{{ updater.currentVersion }}</span>
@@ -63,6 +64,7 @@ const { transferBadgeCount, attentionCount, queueHealthLabel, aggregateSpeedLabe
           type="button"
           :aria-current="ui.activeTab === item.value ? 'page' : undefined"
           :title="`${item.label} · Ctrl+${item.shortcut}`"
+          :aria-label="item.label"
           @click="ui.setTab(item.value)"
         >
           <UIcon :name="item.icon" class="nav-icon" aria-hidden="true" />

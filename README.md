@@ -1,12 +1,12 @@
 # CutFlow Windows 视频剪辑工作台
 
-CutFlow 0.4 以 BDL 原有 Vue/Tauri 界面提供 B站账号登录与下载，独立打开完整 Concat 剪辑窗口，并提供兼容 OpenAI Chat Completions 的图片、视频创作页。当前验证状态见 [验收与已知限制](docs/验收与已知限制.md)，使用步骤及 MCP / CLI 参数见 [创作与外部 AI](docs/创作与外部AI.md)。
+CutFlow 0.5 以 BDL 原有 Vue/Tauri 界面提供 B站账号登录与下载，独立打开完整 Concat 剪辑窗口，并提供兼容 OpenAI Chat Completions 的图片、视频创作页。当前验证状态见 [验收与已知限制](docs/验收与已知限制.md)，使用步骤及 MCP / CLI 参数见 [创作与外部 AI](docs/创作与外部AI.md)。
 
 ## 使用
 
-1. 从本仓库 Actions 的成功构建下载 `CutFlow-0.4.0-windows-x64` Artifact，解压其中的便携 ZIP，启动 `CutFlow.exe`；也可运行 Setup。EXE、DLL、tools 和 WebView2 必须保持完整。
-2. 「B站素材」复用 BDL 的账号菜单、扫码登录、链接解析、多 P、收藏夹和下载队列。完成下载后，从任务的更多操作中选择「送入剪辑」。
-3. 在「设置 → AI 服务」填写已有兼容服务地址和密钥，检查连接后进入「AI 创作」，选择或手填模型 ID。无需先创建工程，结果可预览、打开本地文件或送入剪辑。比例和时长由模型变体或服务决定。
+1. 从本仓库 Actions 的成功构建下载 `CutFlow-0.5.0-windows-x64` Artifact，解压其中的便携 ZIP，启动 `CutFlow.exe`；也可运行 Setup。EXE、DLL、tools 和 WebView2 必须保持完整。
+2. 「B站素材」复用 BDL 的账号菜单、扫码登录、链接解析、多 P、收藏夹和下载队列。完成下载后，从任务的更多操作中选择「加入剪辑」。
+3. 在「设置 → AI 服务」填写已有兼容服务地址和密钥，检查连接后进入「AI 创作」，选择或手填模型 ID。无需先创建工程，结果可预览、打开本地文件或加入剪辑。比例和时长由模型变体或服务决定。
 4. 默认突出日常剪辑；检查器「进阶」展开特效、增强和调色。高级效果与旧工程格式保留。
 5. 「剪辑」打开独立的 `CutFlow-editor.exe`。新建或选择工程后，确认待导入素材的目标工程，再导入素材库。默认不插入时间线。外部 AI 通过 `tools/cutflow-agent.exe mcp` 或 `call` 操作当前工程，草稿默认停在人工检查和导出确认。
 
@@ -28,7 +28,7 @@ python -B -X utf8 scripts/build_windows.py --installer
 
 不需要安装包时省略 `--installer`。旧的 PowerShell 7 入口 `scripts/Build-Windows.ps1` 仅转发给同一 Python 构建器。首次构建要下载较多依赖；构建器验证上游锁定的 FFmpeg、ONNX 和 sherpa SHA256，libclang 使用指定版本的 Python wheel。生成包未签名。
 
-成功输出为 `dist/CutFlow-0.4.0-windows-x64.zip`、SHA256 和可选 Setup；包含主窗口、独立编辑器、BDL、FFmpeg、ffprobe、cutflow-agent、固定 WebView2、DLL、说明、TaskSpec 示例和许可证。WebView2 从微软官方下载并验证锁定 SHA256，随包运行，不安装到系统。打包拒绝覆盖现有同名发行目录。
+成功输出为 `dist/CutFlow-0.5.0-windows-x64.zip`、SHA256 和可选 Setup；包含主窗口、独立编辑器、BDL、FFmpeg、ffprobe、cutflow-agent、固定 WebView2、DLL、说明、TaskSpec 示例和许可证。WebView2 从微软官方下载并验证锁定 SHA256，随包运行，不安装到系统。打包拒绝覆盖现有同名发行目录。
 
 GitHub Actions 在 main 推送后自动构建，也支持手动运行；只有构建及启动检查成功才上传产物。真实账号权限、付费生成、最终音画效果需要单独实测，模拟测试不能替代。
 

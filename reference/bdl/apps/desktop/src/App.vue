@@ -7,6 +7,7 @@ import { useLibraryStore } from './shared/stores/library'
 import { useSettingsStore } from './shared/stores/settings'
 import { useThemeStore } from './shared/stores/theme'
 import { useUpdateStore } from './shared/stores/update'
+import { navItems } from './shared/features/navigation'
 import { useUiStore, type AppTab } from './shared/stores/ui'
 import { mobilePrepareNotifications, mobileSaveImageToGallery, openExternalUrl } from './shared/api/tauri'
 import { isAndroidPlatform, isMobilePlatform } from './shared/platform/environment'
@@ -201,7 +202,7 @@ const handleAppShortcut = (event: KeyboardEvent) => {
     '4': 'settings',
     '5': 'about',
   }
-  const tab = tabByKey[event.key]
+  const tab = isMobile ? tabByKey[event.key] : navItems.find(item => item.shortcut === event.key)?.value
   if (!tab) return
   event.preventDefault()
   ui.setTab(tab)

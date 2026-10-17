@@ -69,11 +69,11 @@ onUnmounted(stop)
       <div class="cutflow-actions"><UiButton :disabled="busy" @click="launch()">{{ busy ? '连接中…' : status.running ? '唤起剪辑窗口' : '打开 / 新建工程' }}</UiButton><UiButton variant="secondary" :disabled="busy" @click="chooseProject">打开已有工程</UiButton></div>
     </section>
     <section v-if="store.pending" class="cutflow-card" aria-labelledby="pending-title">
-      <h2 id="pending-title">待送入剪辑 · {{ store.pending.files.length }} 项</h2>
+      <h2 id="pending-title">待导入素材 · {{ store.pending.files.length }} 项</h2>
       <ul class="file-list"><li v-for="file in store.pending.files" :key="file">{{ file }}</li></ul>
-      <p>确认的目标工程：{{ store.pending.target?.projectPath || '请先在剪辑窗口新建或选择工程，再刷新状态。' }}</p>
+      <p>目标工程：{{ store.pending.target?.projectPath || '请先在剪辑窗口新建或选择工程，再刷新状态。' }}</p>
       <p>素材复制到工程素材库，时间线由你安排。人工编辑或切换工程时会拒绝导入，素材继续保留。</p>
-      <div class="cutflow-actions"><UiButton :disabled="busy || !status.current || !store.pending.target || !!store.pending.jobId" @click="importPending">{{ store.pending.jobId ? '导入中…' : '确认导入此工程' }}</UiButton><UiButton variant="secondary" @click="refresh(true)">刷新并重新选择当前工程</UiButton><UiButton variant="ghost" :disabled="!!store.pending.jobId" @click="store.savePending(null)">移出待导入列表</UiButton></div>
+      <div class="cutflow-actions"><UiButton :disabled="busy || !status.current || !store.pending.target || !!store.pending.jobId" @click="importPending">{{ store.pending.jobId ? '导入中…' : '确认导入此工程' }}</UiButton><UiButton variant="secondary" @click="refresh(true)">改用当前工程</UiButton><UiButton variant="ghost" :disabled="!!store.pending.jobId" @click="store.savePending(null)">移出待导入列表</UiButton></div>
     </section>
     <p v-if="message" class="cutflow-notice" role="status">{{ message }}</p>
     <section class="cutflow-card"><h2>最近工程</h2><p v-if="!recents.length">还没有最近工程。从剪辑窗口创建第一个工程即可。</p><button v-for="project in recents" :key="project.path" class="recent-project" :disabled="busy" @click="launch(project.path)"><strong>{{ project.name }}</strong><span>{{ project.path }}</span><UIcon name="i-tabler-arrow-up-right" aria-hidden="true" /></button></section>

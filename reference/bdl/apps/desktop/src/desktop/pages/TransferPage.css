@@ -113,7 +113,7 @@
 
 .context-menu-heading span {
   color: var(--color-muted);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }

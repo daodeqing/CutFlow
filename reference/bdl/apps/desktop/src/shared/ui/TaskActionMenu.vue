@@ -24,7 +24,7 @@ const visibleSecondaryActions = computed(() =>
   view.secondaryActions.filter((action) => !excludeActions.includes(action.kind)),
 )
 const dropdownItems = computed(() => [
-  ...(view.isCompleted ? [{ label: '送入剪辑', icon: 'i-tabler-movie', onSelect: () => cutflow.sendToEditor([view.outputPath]) }] : []),
+  ...(view.isCompleted ? [{ label: '加入剪辑', icon: 'i-tabler-movie', onSelect: () => cutflow.sendToEditor([view.outputPath]) }] : []),
   ...(showInspect
     ? [{ label: '详情和诊断', icon: 'i-tabler-info-circle', color: 'neutral', onSelect: () => emit('inspect') }]
     : []),

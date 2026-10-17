@@ -67,7 +67,7 @@ const sizeClass = computed(() => `size-${size}`)
 
 .ui-button.variant-danger {
   background: var(--color-danger);
-  color: var(--color-on-accent);
+  color: var(--color-on-danger);
 }
 
 .ui-button.size-compact {

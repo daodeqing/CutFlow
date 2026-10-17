@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import brandMark from '../../assets/cutflow-mark.svg'
 import UiButton from '../../shared/ui/Button.vue'
 import { useAboutPage } from "../../shared/features/about/useAboutPage";
 const { version, links, openLink } = useAboutPage();
@@ -11,7 +12,7 @@ const { version, links, openLink } = useAboutPage();
           class="about-icon grid size-12 shrink-0 place-items-center rounded-xl bg-(--color-accent) text-(--color-on-accent)"
           aria-hidden="true"
         >
-          <UIcon class="size-6" name="i-tabler-chart-bar" />
+          <img :src="brandMark" class="size-12" alt="" />
         </span>
         <div class="grid min-w-0 gap-0.5">
           <span class="about-brand text-xs font-bold text-(--color-accent-strong)">素材 · 剪辑 · AI 创作</span>
@@ -26,7 +27,7 @@ const { version, links, openLink } = useAboutPage();
         <dt class="text-(--color-muted)">当前版本</dt>
         <dd class="tabular-nums m-0 font-bold text-(--color-text)">v{{ version }}</dd>
         <dt class="text-(--color-muted)">应用名称</dt>
-        <dd class="m-0 font-bold text-(--color-text)">CutFlow 0.4 · BDL (MIT) / Concat (AGPL-3.0-or-later)</dd>
+        <dd class="m-0 font-bold text-(--color-text)">CutFlow · BDL (MIT) / Concat (AGPL-3.0-or-later)</dd>
       </dl>
 
       <section class="grid gap-3" aria-labelledby="creator-links-heading">
@@ -39,7 +40,7 @@ const { version, links, openLink } = useAboutPage();
           >
             <UIcon :name="link.icon" class="size-5 shrink-0 text-(--color-accent-strong)" aria-hidden="true" />
             <span class="grid min-w-0 flex-1 gap-0.5">
-              <strong class="text-[13px] text-(--color-text)">{{ link.label }}</strong>
+              <strong class="text-sm text-(--color-text)">{{ link.label }}</strong>
               <span class="truncate text-xs text-(--color-muted)">{{ link.value }}</span>
             </span>
             <UiButton variant="secondary" size="compact" @click="openLink(link.url)">打开</UiButton>

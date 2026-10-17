@@ -59,6 +59,7 @@ def build(installer, skip_smoke, component):
         run([sys.executable, '-B', '-X', 'utf8', 'scripts/frontend.py', 'build'])
         cargo(['test', '--locked', '-p', 'bdl-core'], 'reference/bdl')
         cargo(['test', '--locked', '-p', 'bdl-tauri', '--lib'], 'reference/bdl')
+        cargo(['test', '--locked', '-p', 'cutflow-desktop', '--lib', 'editor_launch_tests'], 'reference/bdl')
         cargo(['build', '--locked', '--release', '-p', 'cutflow-desktop', '--bin', 'CutFlow'], 'reference/bdl')
         hub = artifacts / 'hub'
         fresh(hub)
@@ -124,6 +125,7 @@ def build(installer, skip_smoke, component):
                                 ('docs/验收与已知限制.md', '验收与已知限制.md'), ('docs/SOURCE_OFFER.md', 'SOURCE_OFFER.md'),
                                 ('scripts/启动CutFlow.vbs', '启动CutFlow.vbs'), ('examples/draft.json', 'examples/draft.json')]:
         copy(root / source, stage / destination)
+    copy(root / 'reference/bdl/apps/desktop/src-tauri/icons/icon.ico', stage / 'CutFlow.ico')
     (stage / 'portable').mkdir(exist_ok=True)
     if not (stage / 'WebView2/msedgewebview2.exe').is_file():
         raise RuntimeError('Fixed WebView2 runtime missing')
@@ -145,6 +147,14 @@ def build(installer, skip_smoke, component):
         run([sys.executable, '-B', 'tests/check_hub.py', '--stage', stage], env=clean)
         recycle(stage / 'portable')
         (stage / 'portable').mkdir()
+    component_files = ['CutFlow.exe', 'CutFlow-editor.exe', 'tools/concat.exe', 'tools/cutflow-agent.exe', 'tools/bdl.exe']
+    provenance = {'version':VERSION, 'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip(),
+                  'cloud_run':os.environ.get('GITHUB_RUN_ID'), 'files':{}}
+    for name in component_files:
+        path = stage / name
+        provenance['files'][name] = {'bytes':path.stat().st_size, 'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+    assert provenance['files']['CutFlow-editor.exe']['sha256'] == provenance['files']['tools/concat.exe']['sha256']
+    (stage / 'build-info.json').write_text(json.dumps(provenance,indent=2)+'\n',encoding='utf-8')
     archive = Path(str(stage) + '.zip')
     with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as package:
         for source in sorted(stage.rglob('*')):

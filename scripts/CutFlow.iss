@@ -22,6 +22,7 @@ OutputBaseFilename=CutFlow-{#AppVersion}-windows-x64-setup
 Compression=lzma2
 SolidCompression=yes
 UninstallDisplayIcon={app}\CutFlow.exe
+SetupIconFile={#Stage}\CutFlow.ico
 [Files]
 Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 [Icons]

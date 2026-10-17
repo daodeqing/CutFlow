@@ -177,7 +177,22 @@ def verify(stage):
             assert posts['custom-image'] == 1 and posts['broken-stream'] == 1
             assert authorized_media and all(value is None for value in authorized_media)
             if (stage / 'CutFlow-editor.exe').is_file():
-                call('cutflow.editor.open')
+                # 冷启动必须携带 --project，并保留中文与空格路径边界。
+                project = fixtures / '剪辑工程 with spaces'
+                project.mkdir()
+                (project / 'concat.json').write_text(json.dumps({
+                    'concat':'0.2.7', 'name':'剪辑启动回归',
+                    'video':{'width':1280,'height':720,'rateNum':25,'rateDen':1}
+                }, ensure_ascii=False), encoding='utf-8')
+                call('cutflow.editor.open', {'projectPath':str(project)})
+                current = call('cutflow.project.current')
+                assert os.path.samefile(current['projectPath'], project)
+                recents = call('cutflow.editor.recents')
+                assert any(os.path.samefile(item['path'], project) for item in recents)
+                imported = call('cutflow.assets.import', {
+                    'projectPath':str(project),'expectedRevision':current['revision'],
+                    'operationId':run_id+'-editor-import','files':[str(fixtures/'image.png')],'place':False})
+                complete(imported['jobId'])
                 first = json.loads((portable / 'editor/automation.json').read_text())['process']
                 call('cutflow.editor.open')
                 assert json.loads((portable / 'editor/automation.json').read_text())['process'] == first

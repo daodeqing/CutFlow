@@ -168,6 +168,26 @@ fn editor_status(root: &Path) -> Value {
     }
 }
 
+fn editor_arguments(project: Option<&str>) -> Vec<std::ffi::OsString> {
+    match project.filter(|path| !path.is_empty()) {
+        Some(path) => vec!["--project".into(), path.into()],
+        None => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod editor_launch_tests {
+    use super::editor_arguments;
+    #[test]
+    fn project_paths_preserve_argument_boundaries() {
+        assert!(editor_arguments(None).is_empty());
+        assert!(editor_arguments(Some("")).is_empty());
+        for path in [r"D:\Projects\sample", r"D:\剪辑工程\我的 视频"] {
+            assert_eq!(editor_arguments(Some(path)), vec![std::ffi::OsString::from("--project"), path.into()]);
+        }
+    }
+}
+
 fn open_editor(hub: &Hub, params: Value) -> Result<Value> {
     let _launch = hub.launch.lock().unwrap();
     if editor_status(&hub.runtime.root)["running"] == true {
@@ -186,12 +206,7 @@ fn open_editor(hub: &Hub, params: Value) -> Result<Value> {
         ));
     }
     let mut command = std::process::Command::new(executable);
-    if let Some(project) = params["projectPath"]
-        .as_str()
-        .filter(|path| !path.is_empty())
-    {
-        command.arg(project);
-    }
+    command.args(editor_arguments(params["projectPath"].as_str()));
     command.current_dir(hub.runtime.root.parent().unwrap());
     #[cfg(windows)]
     {

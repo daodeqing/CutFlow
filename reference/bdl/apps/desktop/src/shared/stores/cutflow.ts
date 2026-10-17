@@ -16,14 +16,16 @@ export const useCutflowStore = defineStore('cutflow', {
       this.pending = pending
       localStorage.setItem('cutflow.pendingImport', JSON.stringify(pending))
     },
-    sendToEditor(files: string[]) {
+    sendToEditor(files: string[]): boolean {
       const current = this.pending
       if (current?.jobId) {
-        useUiStore().pushToast('请先检查上一批素材的导入结果', 'warning')
+        useUiStore().pushToast('上一批素材正在导入，请完成后再添加。此次未加入。', 'warning')
+        return false
       } else {
-        this.savePending({ files: [...new Set([...(current?.files || []), ...files])], operationId: operationId() })
+        this.savePending({ ...current, files: [...new Set([...(current?.files || []), ...files])], operationId: operationId() })
       }
       useUiStore().setTab('editor')
+      return true
     },
   },
 })
