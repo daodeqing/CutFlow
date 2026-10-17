@@ -29,7 +29,10 @@ const closeWindow = () => {
 const { transferBadgeCount, attentionCount, queueHealthLabel, aggregateSpeedLabel } = useNavigationStatus();
 </script>
 <template>
-  <main class="app-shell" :class="{ 'platform-macos': isMacOs, 'nav-collapsed': navCollapsed }">
+  <main
+    class="app-shell"
+    :class="{ 'platform-macos': isMacOs, 'nav-collapsed': navCollapsed || ui.activeTab === 'creation' }"
+  >
     <WabiVisuals v-model="designOpen" />
     <header class="app-titlebar" data-tauri-drag-region @dblclick="toggleMaximizeWindow">
       <div class="titlebar-brand" data-tauri-drag-region>

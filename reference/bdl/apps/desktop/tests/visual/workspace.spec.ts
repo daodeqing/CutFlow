@@ -3742,7 +3742,7 @@ test.describe('CutFlow 0.5 compact creation', () => {
             ...Array.from({ length: 16 }, (_, index) => ({ id: 'gflow-custom-long-model-name-for-scroll-and-overflow-' + index, kind: 'image', maxReferences: 3 })),
           ];
           runtime.invoke = async (command, args) => {
-            if (command === 'plugin:app|version') return '0.5.0';
+            if (command === 'plugin:app|version') return '0.6.0';
             if (command === 'cutflow_call') {
               if (args?.method === 'cutflow.hub.snapshot') return {
                 connection: { baseUrl: 'http://127.0.0.1:8317/v1' }, models, references: [], fault: null,
@@ -3896,7 +3896,7 @@ test.describe('Wabi liquid glass acceptance', () => {
         const invoke = target.__TAURI_INTERNALS__.invoke;
         const cover = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"><defs><linearGradient id="g"><stop stop-color="#103337"/><stop offset="1" stop-color="#0b0f12"/></linearGradient></defs><rect width="480" height="270" fill="url(#g)"/><path d="M20 240 165 50 310 240Z" fill="#0d7a68"/><path d="M170 240 310 80 450 240Z" fill="#2dd4bf" opacity=".45"/><circle cx="385" cy="55" r="22" fill="#5eead4"/></svg>');
         target.__TAURI_INTERNALS__.invoke = async (command, args) => {
-          if (command === 'plugin:app|version') return '0.5.0';
+          if (command === 'plugin:app|version') return '0.6.0';
           if (command === 'plugin:event|listen') { listeners.set(args?.event as string, args?.handler as number); return id++; }
           if (command === 'queue_list') return ['downloading', 'paused', 'failed', 'waiting', 'completed'].map((status, index) => ({
             id: 'wabi-' + index, title: ['光影之间 · 城市与远方 4K', '剪辑节奏与声音设计', '需重新解析的视频素材', '定时工作队列 · 下一段旅程', '已完成 · 玻璃建筑素材集'][index],

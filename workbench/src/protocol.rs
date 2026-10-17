@@ -9,6 +9,14 @@ pub struct Call {
 }
 
 pub const METHODS: &[(&str, &str)] = &[
+    ("cutflow.creation.catalog", "读取轻量创作目录；refresh=true 执行不生成媒体的项目能力检查"),
+    ("cutflow.creation.projects.list", "分页列出真实 Flow 项目绑定和历史未归类"),
+    ("cutflow.creation.projects.create", "创建专属 Flow 项目；需要 name、preferredModel、operationId"),
+    ("cutflow.creation.projects.get", "查询项目；未确认的创建仅查询原请求，不自动重建"),
+    ("cutflow.creation.sessions.list", "分页列出 projectId 内的聊天"),
+    ("cutflow.creation.sessions.create", "在已绑定项目内创建聊天；需要 projectId、operationId"),
+    ("cutflow.creation.turns.list", "按 sessionId 分页列出生成轮次及任务；最新优先"),
+    ("cutflow.creation.drafts.save", "按聊天独立保存图片或视频草稿"),
     ("cutflow.editor.open", "打开或唤起独立 Concat 剪辑器；可选 projectPath"),
     ("cutflow.editor.status", "查询剪辑器是否运行及当前工程"),
     ("cutflow.editor.focus", "唤起剪辑窗口"),
@@ -113,6 +121,10 @@ pub fn tools() -> Value {
         "name": method.replace('.', "_"), "description": description,
         "inputSchema": {"type":"object","properties":{
             "projectPath":{"type":"string"},"operationId":{"type":"string"},
+            "creationProjectId":{"type":"string"},"continuationAssetPath":{"type":"string"},"projectId":{"type":"string"},"turnId":{"type":"string"},
+            "title":{"type":"string"},"preferredModel":{"type":"string"},"refresh":{"type":"boolean"},
+            "cursor":{"type":["string","null"]},"limit":{"type":"integer","minimum":1,"maximum":50},
+            "draft":{"type":"object"},"activeOnly":{"type":"boolean"},"sinceRevision":{"type":"integer","minimum":0},
             "expectedRevision":{"type":"integer","minimum":0},"jobId":{"type":"string"},
             "url":{"type":"string"},"parts":{"type":"string"},"quality":{"type":"string"},
             "allowLower":{"type":"boolean"},"rights":{"type":"string"},
@@ -133,9 +145,18 @@ pub fn tools() -> Value {
         },"additionalProperties":false}
         });
         let fields=match *method {
+            "cutflow.creation.catalog"=>"refresh",
+            "cutflow.creation.projects.list"=>"cursor limit",
+            "cutflow.creation.projects.create"=>"name preferredModel operationId",
+            "cutflow.creation.projects.get"=>"projectId",
+            "cutflow.creation.sessions.list"=>"projectId cursor limit",
+            "cutflow.creation.sessions.create"=>"projectId title operationId",
+            "cutflow.creation.turns.list"=>"sessionId cursor limit",
+            "cutflow.creation.drafts.save"=>"sessionId kind draft",
+            "cutflow.jobs.list"=>"sessionId activeOnly sinceRevision",
             "cutflow.editor.status"|"cutflow.editor.focus"|"cutflow.editor.recents"=>"",
             "cutflow.editor.open"=>"projectPath",
-            "cutflow.project.current"|"cutflow.connection.get"|"cutflow.models.list"|"cutflow.account.start"|"cutflow.account.status"|"cutflow.account.logout"|"cutflow.references.list"|"cutflow.jobs.list"=>"",
+            "cutflow.project.current"|"cutflow.connection.get"|"cutflow.models.list"|"cutflow.account.start"|"cutflow.account.status"|"cutflow.account.logout"|"cutflow.references.list"=>"",
             "cutflow.project.save"|"cutflow.edit.undo"|"cutflow.edit.redo"=>"projectPath operationId expectedRevision",
             "cutflow.edit.apply"=>"projectPath operationId expectedRevision command commands",
             "cutflow.assets.import"=>"projectPath operationId expectedRevision files place",
@@ -143,7 +164,7 @@ pub fn tools() -> Value {
             "cutflow.export.open"=>"projectPath",
             "cutflow.connection.save"=>"baseUrl apiKey",
             "cutflow.connection.test"=>"model",
-            "cutflow.generate"=>"projectPath operationId model prompt kind references maxGenerationCalls stream aspect_ratio duration n quality image_size",
+            "cutflow.generate"=>"projectPath creationProjectId sessionId turnId continuationAssetPath operationId model prompt kind references maxGenerationCalls stream aspect_ratio duration n quality image_size",
             "cutflow.account.poll"=>"sessionId",
             "cutflow.bilibili.favorites"=>"page folderId",
             "cutflow.bilibili.parse"=>"url",
@@ -155,6 +176,12 @@ pub fn tools() -> Value {
             _=>"jobId",
         };
         let required=match *method {
+            "cutflow.creation.projects.create"=>"name preferredModel operationId",
+            "cutflow.creation.projects.get"=>"projectId",
+            "cutflow.creation.sessions.list"=>"projectId",
+            "cutflow.creation.sessions.create"=>"projectId operationId",
+            "cutflow.creation.turns.list"=>"sessionId",
+            "cutflow.creation.drafts.save"=>"sessionId kind draft",
             "cutflow.edit.apply"|"cutflow.project.save"|"cutflow.edit.undo"|"cutflow.edit.redo"=>"projectPath operationId expectedRevision",
             "cutflow.assets.import"=>"projectPath operationId expectedRevision files",
             "cutflow.preview"|"cutflow.export.open"=>"projectPath",

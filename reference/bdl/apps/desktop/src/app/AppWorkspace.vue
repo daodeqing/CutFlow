@@ -27,19 +27,17 @@ const activePageComponent = computed(() => (mobile ? mobilePages : desktopPages)
 <template>
   <section class="main-region" :data-page="ui.activeTab" :class="{ 'workspace-mobile': mobile }">
     <BackgroundParseStatus />
-    <Suspense>
-      <Transition name="workspace" mode="out-in">
-        <KeepAlive>
-          <component :is="activePageComponent" :key="ui.activeTab" />
-        </KeepAlive>
-      </Transition>
-      <template #fallback>
-        <div class="workspace-loading" role="status">
-          <span></span>
-          正在准备工作区
-        </div>
-      </template>
-    </Suspense>
+    <KeepAlive>
+      <Suspense :timeout="0">
+        <component :is="activePageComponent" :key="ui.activeTab" />
+        <template #fallback>
+          <div class="workspace-loading" role="status">
+            <span></span>
+            正在准备工作区
+          </div>
+        </template>
+      </Suspense>
+    </KeepAlive>
   </section>
 </template>
 <style scoped>
@@ -83,23 +81,6 @@ const activePageComponent = computed(() => (mobile ? mobilePages : desktopPages)
   animation: loading-track 900ms var(--ease-out) infinite alternate;
 }
 
-.workspace-enter-active,
-.workspace-leave-active {
-  transition:
-    opacity var(--duration-base) var(--ease-out),
-    transform var(--duration-base) var(--ease-out);
-}
-
-.workspace-enter-from {
-  opacity: 0;
-  transform: translateY(5px);
-}
-
-.workspace-leave-to {
-  opacity: 0;
-  transform: translateY(-3px);
-}
-
 @keyframes loading-track {
   from {
     transform: translateX(-100%);
@@ -107,6 +88,12 @@ const activePageComponent = computed(() => (mobile ? mobilePages : desktopPages)
 
   to {
     transform: translateX(200%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-loading span::after {
+    animation: none;
   }
 }
 

@@ -1,4 +1,4 @@
-use crate::{Error, Result, atomic_json, flow, required, secret};
+use crate::{Error, Result, atomic_json, flow, required, secret, creation::{self, CreationProject, CreationSession, CreationTurn}};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -21,6 +21,12 @@ pub struct Job {
     pub stage: String,
     pub result: Option<Value>,
     pub error: Option<Error>,
+    #[serde(default)]
+    pub revision: u64,
+    #[serde(default)]
+    pub created_at: u64,
+    #[serde(default)]
+    pub updated_at: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -33,7 +39,7 @@ pub struct Reference {
     pub prompt: String,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Store {
     pub version: u32,
@@ -41,6 +47,22 @@ pub struct Store {
     pub models: Vec<flow::Model>,
     pub references: Vec<Reference>,
     pub jobs: Vec<Job>,
+    #[serde(default)]
+    pub projects: Vec<CreationProject>,
+    #[serde(default)]
+    pub sessions: Vec<CreationSession>,
+    #[serde(default)]
+    pub turns: Vec<CreationTurn>,
+    #[serde(default="creation::workspace")]
+    pub workspace_id: String,
+    #[serde(default)]
+    pub instance_id: Option<String>,
+    #[serde(default)]
+    pub project_binding: bool,
+    #[serde(default)]
+    pub project_binding_fault: Option<String>,
+    #[serde(default)]
+    pub revision: u64,
 }
 
 #[derive(Clone)]
@@ -52,6 +74,10 @@ pub struct Runtime {
     pub store: Arc<Mutex<Store>>,
     cancels: Arc<Mutex<BTreeMap<String, Arc<AtomicBool>>>>,
     pub fault: Option<String>,
+    pub(crate) project_creation_gate: Arc<Mutex<()>>,
+    persist_gate: Arc<Mutex<()>>,
+    reservation_gate: Arc<Mutex<()>>,
+    retry_cache: Arc<Mutex<BTreeMap<String, (u64, bool)>>>,
 }
 
 impl Runtime {
@@ -68,7 +94,7 @@ impl Runtime {
         let path = root.join("workbench.json");
         let (mut store, fault) = if path.exists() {
             match serde_json::from_slice::<Store>(&std::fs::read(&path)?) {
-                Ok(store) if store.version == 1 => (store, None),
+                Ok(store) if matches!(store.version, 1 | 2) => (store, None),
                 _ => (
                     Store::default(),
                     Some("任务存储损坏或版本不兼容，禁止覆盖；请先备份核查".into()),
@@ -77,12 +103,33 @@ impl Runtime {
         } else {
             (
                 Store {
-                    version: 1,
+                    version: 2,
+                    workspace_id: creation::workspace(),
                     ..Store::default()
                 },
                 None,
             )
         };
+        if store.version == 1 && fault.is_none() {
+            // Keep the original bytes before migrating any state or asset references.
+            let backup = root.join("backups").join("workbench.v1.json");
+            if !backup.exists() {
+                std::fs::create_dir_all(backup.parent().unwrap())?;
+                std::fs::copy(&path, &backup)?;
+            }
+            creation::migrate(&mut store);
+        }
+        for session in &mut store.sessions {
+            session.drafts = creation::normalize_drafts(&session.drafts);
+        }
+        for project in &mut store.projects {
+            if project.state == "creating" {
+                project.state = "creation_unknown".into();
+                project.error = Some("应用重启，创建结果待核查；请查询原请求，禁止自动重建".into());
+            }
+        }
+        store.revision = store.revision.saturating_add(1);
+        let revision = store.revision;
         for job in &mut store.jobs {
             if matches!(job.status.as_str(), "queued" | "running") {
                 job.status = if job.stage.starts_with("generating") {
@@ -92,6 +139,8 @@ impl Runtime {
                 }
                 .into();
                 job.stage = "程序已重启；请检查已完成素材，不会自动重发生成".into();
+                job.revision = revision;
+                job.updated_at = creation::now();
             }
         }
         let account_root = root.join("localappdata/CutFlow");
@@ -103,6 +152,10 @@ impl Runtime {
             store: Arc::new(Mutex::new(store)),
             cancels: Arc::new(Mutex::new(BTreeMap::new())),
             fault,
+            project_creation_gate: Arc::new(Mutex::new(())),
+            persist_gate: Arc::new(Mutex::new(())),
+            reservation_gate: Arc::new(Mutex::new(())),
+            retry_cache: Arc::new(Mutex::new(BTreeMap::new())),
         };
         if runtime.fault.is_none() {
             runtime.persist()?;
@@ -114,10 +167,9 @@ impl Runtime {
         if let Some(fault) = &self.fault {
             return Err(Error::new("store_error", fault));
         }
-        atomic_json(
-            &self.root.join("workbench.json"),
-            &*self.store.lock().unwrap(),
-        )
+        let _serial = self.persist_gate.lock().unwrap();
+        let snapshot = self.store.lock().unwrap().clone();
+        atomic_json(&self.root.join("workbench.json"), &snapshot)
     }
 
     pub fn existing(&self, method: &str, params: &Value) -> Result<Option<Job>> {
@@ -158,37 +210,66 @@ impl Runtime {
         })
     }
 
-    fn job_view(&self, job: &Job) -> Value {
+    pub(crate) fn job_view(&self, job: &Job) -> Value {
+        let cached = self.retry_cache.lock().unwrap().get(&job.id).copied();
+        let retry = if let Some((revision, retry)) = cached.filter(|(revision, _)| *revision == job.revision) {
+            let _ = revision;
+            retry
+        } else {
+            let retry = self.can_retry_download(job);
+            self.retry_cache.lock().unwrap().insert(job.id.clone(), (job.revision, retry));
+            retry
+        };
         let mut value = json!(job);
-        value["canRetryDownload"] = json!(self.can_retry_download(job));
+        value["canRetryDownload"] = json!(retry);
         value
     }
 
     pub fn snapshot(&self) -> Value {
-        let store = self.store.lock().unwrap();
+        // Compatibility snapshot: clone before any receipt/file inspection.
+        let store = self.store.lock().unwrap().clone();
+        let jobs = store.jobs.iter().map(|job| {
+            let mut value = json!(job);
+            value["canRetryDownload"] = json!(self.can_retry_download(job));
+            value
+        }).collect::<Vec<_>>();
         json!({"connection":store.connection,"models":store.models,"references":store.references,
-            "jobs":store.jobs.iter().map(|job| self.job_view(job)).collect::<Vec<_>>(),"fault":self.fault})
+            "jobs":jobs,"fault":self.fault})
+    }
+
+    pub fn jobs_list(&self, params: &Value) -> Value {
+        let (jobs, revision) = {
+            let store = self.store.lock().unwrap();
+            let since = params["sinceRevision"].as_u64().unwrap_or(0);
+            let jobs = store.jobs.iter().filter(|job| {
+                (!params["activeOnly"].as_bool().unwrap_or(false) || matches!(job.status.as_str(), "running" | "queued"))
+                && params["sessionId"].as_str().is_none_or(|id| job.params["sessionId"].as_str() == Some(id))
+                && (since == 0 || job.revision > since)
+            }).cloned().collect::<Vec<_>>();
+            (jobs, store.revision)
+        };
+        json!({"jobs":jobs.iter().map(|job| self.job_view(job)).collect::<Vec<_>>(),"revision":revision})
     }
 
     pub fn update(&self, id: &str, stage: &str) {
         {
             let mut store = self.store.lock().unwrap();
+            store.revision = store.revision.saturating_add(1);
+            let revision = store.revision;
             if let Some(job) = store.jobs.iter_mut().find(|job| job.id == id) {
+                job.revision = revision;
+                job.updated_at = creation::now();
                 job.stage = stage.into();
             }
         }
         if let Err(error) = self.persist() {
-            if let Some(cancel) = self.cancels.lock().unwrap().get(id) {
-                cancel.store(true, Ordering::SeqCst);
-            }
-            if let Some(job) = self
-                .store
-                .lock()
-                .unwrap()
-                .jobs
-                .iter_mut()
-                .find(|job| job.id == id)
-            {
+            if let Some(cancel) = self.cancels.lock().unwrap().get(id) { cancel.store(true, Ordering::SeqCst); }
+            let mut store = self.store.lock().unwrap();
+            store.revision = store.revision.saturating_add(1);
+            let revision = store.revision;
+            if let Some(job) = store.jobs.iter_mut().find(|job| job.id == id) {
+                job.revision = revision;
+                job.updated_at = creation::now();
                 job.stage = format!("任务检查点保存失败：{}", error.message);
             }
         }
@@ -197,7 +278,11 @@ impl Runtime {
     pub fn finish(&self, id: &str, result: Result<Value>) {
         {
             let mut store = self.store.lock().unwrap();
+            store.revision = store.revision.saturating_add(1);
+            let revision = store.revision;
             if let Some(job) = store.jobs.iter_mut().find(|job| job.id == id) {
+                job.revision = revision;
+                job.updated_at = creation::now();
                 match result {
                     Ok(result) => {
                         job.status = "completed".into();
@@ -221,64 +306,82 @@ impl Runtime {
         }
         self.cancels.lock().unwrap().remove(id);
         if let Err(error) = self.persist() {
-            if let Some(job) = self
-                .store
-                .lock()
-                .unwrap()
-                .jobs
-                .iter_mut()
-                .find(|job| job.id == id)
-            {
+            let mut store = self.store.lock().unwrap();
+            store.revision = store.revision.saturating_add(1);
+            let revision = store.revision;
+            if let Some(job) = store.jobs.iter_mut().find(|job| job.id == id) {
+                job.revision = revision;
+                job.updated_at = creation::now();
                 job.status = "result_unknown".into();
-                job.stage = format!("结果未持久化：{}；重启前请保存素材", error.message);
+                job.stage = format!("结果未持久化：{}。退出前请保留素材", error.message);
                 job.error = Some(error);
             }
         }
     }
 
-    pub fn reserve(&self, method: &str, params: Value) -> Result<(Job, bool, Arc<AtomicBool>)> {
-        if self.fault.is_some() {
-            self.persist()?;
-        }
+    pub fn reserve(&self, method: &str, mut params: Value) -> Result<(Job, bool, Arc<AtomicBool>)> {
+        let _serial = self.reservation_gate.lock().unwrap();
+        if self.fault.is_some() { self.persist()?; }
         let operation = required(&params, "operationId")?.to_string();
-        if operation.len() > 128 {
-            return Err(Error::new("invalid_request", "operationId 过长"));
-        }
-        let mut store = self.store.lock().unwrap();
-        if let Some(previous) = store.jobs.iter().find(|job| job.operation_id == operation) {
-            if previous.params != params || previous.method != method {
-                return Err(Error::new(
-                    "operation_conflict",
-                    "operationId 已被其他请求使用",
-                ));
+        if operation.len() > 128 { return Err(Error::new("invalid_request", "operationId 过长")); }
+        if let Some(previous) = self.store.lock().unwrap().jobs.iter().find(|job| job.operation_id == operation).cloned() {
+            let mut original = previous.params.clone();
+            let mut incoming = params.clone();
+            if previous.params["creationProjectId"].is_string() {
+                for field in ["gflow_workspace_id", "gflow_project_id", "gflow_instance_id"] {
+                    original.as_object_mut().unwrap().remove(field);
+                    incoming.as_object_mut().unwrap().remove(field);
+                }
             }
-            return Ok((previous.clone(), false, Arc::new(AtomicBool::new(false))));
+            if previous.method != method || original != incoming {
+                return Err(Error::new("operation_conflict", "operationId 已被其他请求使用"));
+            }
+            return Ok((previous, false, Arc::new(AtomicBool::new(false))));
         }
-        if self.cancels.lock().unwrap().len() >= 4 {
-            return Err(Error::new("busy", "同时最多执行四项后台任务"));
+        if method == "cutflow.generate" { self.bind_generation(&mut params)?; }
+        let mut store = self.store.lock().unwrap();
+        if self.cancels.lock().unwrap().len() >= 4 { return Err(Error::new("busy", "同时最多执行四个后台任务")); }
+        if method == "cutflow.generate" {
+            if let Some(session_id) = params["sessionId"].as_str() {
+                if store.jobs.iter().any(|job| job.params["sessionId"].as_str() == Some(session_id)
+                    && matches!(job.status.as_str(), "running" | "queued")) {
+                    return Err(Error::new("session_busy", "当前聊天已有一轮生成，请等待完成或停止后继续"));
+                }
+            }
+            if let Some(turn_id) = params["turnId"].as_str() {
+                if store.turns.iter().any(|turn| turn.id == turn_id) {
+                    return Err(Error::new("turn_conflict", "turnId 已被另一轮生成使用"));
+                }
+            }
         }
+        store.revision = store.revision.saturating_add(1);
+        let timestamp = creation::now();
         let job = Job {
-            id: uuid::Uuid::new_v4().to_string(),
-            operation_id: operation,
-            method: method.into(),
-            params,
-            status: "running".into(),
-            stage: "queued".into(),
-            result: None,
-            error: None,
+            revision:store.revision, created_at:timestamp, updated_at:timestamp,
+            id:uuid::Uuid::new_v4().to_string(), operation_id:operation, method:method.into(), params,
+            status:"running".into(), stage:"queued".into(), result:None, error:None,
         };
         let cancel = Arc::new(AtomicBool::new(false));
-        self.cancels
-            .lock()
-            .unwrap()
-            .insert(job.id.clone(), cancel.clone());
+        self.cancels.lock().unwrap().insert(job.id.clone(), cancel.clone());
         store.jobs.push(job.clone());
-        if let Err(error) = atomic_json(&self.root.join("workbench.json"), &*store) {
+        if let (Some(session_id), Some(turn_id), Some(project_id)) =
+            (job.params["sessionId"].as_str(), job.params["turnId"].as_str(), job.params["creationProjectId"].as_str()) {
+            store.turns.push(CreationTurn { id:turn_id.into(), session_id:session_id.into(), job_id:job.id.clone(),
+                prompt:job.params["prompt"].as_str().unwrap_or("").into(), params:job.params.clone(), created_at:timestamp });
+            if let Some(session) = store.sessions.iter_mut().find(|s| s.id == session_id) {
+                session.updated_at = timestamp;
+                if session.title == "新聊天" { session.title = job.params["prompt"].as_str().unwrap_or("新聊天").chars().take(24).collect(); }
+            }
+            if let Some(project) = store.projects.iter_mut().find(|p| p.id == project_id) { project.updated_at = timestamp; }
+        }
+        drop(store);
+        if let Err(error) = self.persist() {
+            let mut store = self.store.lock().unwrap();
             store.jobs.retain(|entry| entry.id != job.id);
+            store.turns.retain(|turn| turn.job_id != job.id);
             self.cancels.lock().unwrap().remove(&job.id);
             return Err(error);
         }
-        drop(store);
         Ok((job, true, cancel))
     }
 
@@ -299,6 +402,7 @@ impl Runtime {
     }
 
     pub fn dispatch(&self, method: &str, params: Value) -> Result<Value> {
+        if method.starts_with("cutflow.creation.") { return self.creation_dispatch(method, params); }
         match method {
             "cutflow.connection.get" => Ok(json!(self.store.lock().unwrap().connection)),
             "cutflow.connection.save" => {
@@ -309,15 +413,35 @@ impl Runtime {
                     }
                     secret(&self.root, "flow-key", Some(key))?;
                 }
-                self.store.lock().unwrap().connection.base_url = base_url;
+                {
+                    let mut store = self.store.lock().unwrap();
+                    store.connection.base_url = base_url;
+                    store.project_binding = false;
+                    store.instance_id = None;
+                    store.revision = store.revision.saturating_add(1);
+                }
                 self.persist()?;
                 Ok(json!({"saved":true}))
             }
             "cutflow.models.list" => {
                 let connection = self.store.lock().unwrap().connection.clone();
                 let key = self.api_key()?;
-                let models = flow::models(&connection, &key)?;
-                self.store.lock().unwrap().models = models.clone();
+                let mut models = flow::models(&connection, &key)?;
+                {
+                    let mut store = self.store.lock().unwrap();
+                    if store.connection.base_url != connection.base_url {
+                        return Err(Error::new("connection_changed", "模型响应来自旧服务连接，请重新刷新"));
+                    }
+                    for model in &mut models {
+                        if let Some(previous) = store.models.iter().find(|previous| previous.id == model.id) {
+                            model.aspects = model.aspects.take().or_else(|| previous.aspects.clone());
+                            model.image_sizes = model.image_sizes.take().or_else(|| previous.image_sizes.clone());
+                            model.durations = model.durations.take().or_else(|| previous.durations.clone());
+                        }
+                    }
+                    store.models = models.clone();
+                    store.revision = store.revision.saturating_add(1);
+                }
                 self.persist()?;
                 Ok(json!({"models":models}))
             }
@@ -365,24 +489,39 @@ impl Runtime {
                     if cancels.len() >= 4 || cancels.contains_key(id) { return Err(Error::new("busy", "任务正在执行")); }
                     cancels.insert(id.into(), cancel.clone());
                 }
+                let previous = job.clone();
                 job.status = "running".into();
                 job.stage = "downloading".into();
                 job.error = None;
-                *self.store.lock().unwrap().jobs.iter_mut().find(|item| item.id == id).unwrap() = job.clone();
-                self.persist()?;
+                {
+                    let mut store = self.store.lock().unwrap();
+                    store.revision = store.revision.saturating_add(1);
+                    job.revision = store.revision;
+                    job.updated_at = creation::now();
+                    *store.jobs.iter_mut().find(|item| item.id == id).unwrap() = job.clone();
+                }
+                if let Err(error) = self.persist() {
+                    self.cancels.lock().unwrap().remove(id);
+                    let mut store = self.store.lock().unwrap();
+                    store.revision = store.revision.saturating_add(1);
+                    let revision = store.revision;
+                    if let Some(current) = store.jobs.iter_mut().find(|item| item.id == id) {
+                        *current = previous;
+                        current.revision = revision;
+                        current.updated_at = creation::now();
+                    }
+                    return Err(error);
+                }
                 let runtime = self.clone();
                 std::thread::spawn(move || { let result = runtime.download_generation(&job, &folder, &cancel); runtime.finish(&job.id, result); });
                 Ok(json!({"jobId":id,"status":"running"}))
             }
-            "cutflow.jobs.list" => Ok(json!({"jobs":self.store.lock().unwrap().jobs.iter().map(|job| self.job_view(job)).collect::<Vec<_>>()})),
+            "cutflow.jobs.list" => Ok(self.jobs_list(&params)),
             "cutflow.jobs.get" => {
-                let store = self.store.lock().unwrap();
-                let job = store
-                    .jobs
-                    .iter()
-                    .find(|job| Some(job.id.as_str()) == params["jobId"].as_str())
+                let job = self.store.lock().unwrap().jobs.iter()
+                    .find(|job| Some(job.id.as_str()) == params["jobId"].as_str()).cloned()
                     .ok_or_else(|| Error::new("not_found", "任务不存在"))?;
-                Ok(self.job_view(job))
+                Ok(self.job_view(&job))
             }
             "cutflow.jobs.cancel" => {
                 let id = required(&params, "jobId")?;
@@ -439,7 +578,7 @@ impl Runtime {
         }
     }
 
-    fn api_key(&self) -> Result<String> {
+    pub(crate) fn api_key(&self) -> Result<String> {
         secret(&self.root, "flow-key", None)?
             .filter(|key| !key.is_empty())
             .ok_or_else(|| Error::new("configuration_required", "请在 AI 创作设置中保存 API Key"))
@@ -453,7 +592,13 @@ impl Runtime {
     }
 
     fn output_folder(&self, job: &Job) -> Result<PathBuf> {
-        if let Some(path) = job.params["projectPath"].as_str().filter(|path| !path.is_empty()) {
+        if let (Some(project_id), Some(session_id)) = (job.params["creationProjectId"].as_str(), job.params["sessionId"].as_str()) {
+            // IDs come from our persisted UUID records, never from arbitrary user paths.
+            if ![project_id, session_id, &job.id].iter().all(|id| id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')) {
+                return Err(Error::new("invalid_request", "创作目录标识无效"));
+            }
+            Ok(self.root.join("generated").join(project_id).join(session_id).join(&job.id))
+        } else if let Some(path) = job.params["projectPath"].as_str().filter(|path| !path.is_empty()) {
             let project = Path::new(path).canonicalize()?;
             if !project.is_dir() { return Err(Error::new("invalid_request", "工程目录不存在")); }
             Ok(project.join("assets").join("cutflow").join(&job.id))
@@ -477,11 +622,13 @@ impl Runtime {
             let destination = folder.join(format!("generated-{index}.{extension}"));
             let existing = ["png", "jpg", "webp", "mp4", "webm", "mov"].iter().map(|ext| destination.with_extension(ext)).find(|path| path.is_file());
             let path = match existing { Some(path) => path, None => flow::download(&connection, url.as_str().ok_or_else(|| Error::new("invalid_media", "结果地址无效"))?, &destination, cancel)? };
-            let asset = self.probe(&path, cancel)?;
+            let mut asset = self.probe(&path, cancel)?;
             if (kind == "video" && (asset["duration"].as_f64().is_none() || asset["width"].as_u64().unwrap_or(0) == 0)) || (kind == "image" && !asset["stillImage"].as_bool().unwrap_or(false)) {
                 return Err(Error::new("invalid_media", "生成结果类型与请求不符，文件已保留供核查"));
             }
-            if thumbnail.is_none() { thumbnail = self.thumbnail(&path, folder, cancel); }
+            let asset_thumbnail = self.thumbnail_named(&path, folder, &format!("thumbnail-{index}.jpg"), cancel);
+            asset["thumbnail"] = json!(asset_thumbnail);
+            if thumbnail.is_none() { thumbnail = asset_thumbnail; }
             assets.push(asset);
         }
         Ok(json!({"assets":assets,"thumbnail":thumbnail,"model":job.params["model"]}))
@@ -501,6 +648,13 @@ impl Runtime {
                         "请明确允许的生成次数 maxGenerationCalls",
                     ));
                 }
+                if job.params["creationProjectId"].is_string() {
+                    self.refresh_project_binding()?;
+                    let instance = self.store.lock().unwrap().instance_id.clone();
+                    if instance.as_deref() != job.params["gflow_instance_id"].as_str() {
+                        return Err(Error::new("service_instance_changed", "服务实例已变化，禁止向另一套账号提交旧项目"));
+                    }
+                }
                 let connection = self.store.lock().unwrap().connection.clone();
                 let key = self.api_key()?;
                 self.update(&job.id, "generating");
@@ -517,12 +671,19 @@ impl Runtime {
                     request["client_request_id"] = json!(format!("{}-{index}", job.id));
                     let url = flow::generate(&connection, &key, &request, cancel, |message| {
                         let mut store = self.store.lock().unwrap();
-                        if let Some(current) = store.jobs.iter_mut().find(|current| current.id == job.id) { current.stage = format!("generating: 第 {}/{} 张；{message}", index + 1, count); }
+                        store.revision = store.revision.saturating_add(1);
+                        let revision = store.revision;
+                        if let Some(current) = store.jobs.iter_mut().find(|current| current.id == job.id) { current.revision = revision; current.updated_at = creation::now(); current.stage = format!("generating: 第 {}/{} 张；{message}", index + 1, count); }
                     })?;
                     urls.push(url);
                     atomic_json(&folder.join("generation-result.json"), &json!({"urls":urls,"url":urls[0],"model":job.params["model"],"connection":connection}))?;
                     let partial = self.download_generation(job, &folder, cancel)?;
-                    if let Some(current) = self.store.lock().unwrap().jobs.iter_mut().find(|current| current.id == job.id) { current.result = Some(partial); }
+                    {
+                        let mut store = self.store.lock().unwrap();
+                        store.revision = store.revision.saturating_add(1);
+                        let revision = store.revision;
+                        if let Some(current) = store.jobs.iter_mut().find(|current| current.id == job.id) { current.result = Some(partial); current.revision = revision; current.updated_at = creation::now(); }
+                    }
                     self.persist()?;
                 }
                 self.update(&job.id, "downloading");
@@ -603,8 +764,9 @@ impl Runtime {
         )
     }
 
-    fn thumbnail(&self, source: &Path, folder: &Path, cancel: &AtomicBool) -> Option<PathBuf> {
-        let target = folder.join("thumbnail.jpg");
+    fn thumbnail_named(&self, source: &Path, folder: &Path, filename: &str, cancel: &AtomicBool) -> Option<PathBuf> {
+        let target = folder.join(filename);
+        if target.is_file() { return Some(target); }
         let mut command = cutflow_download::process::command(&self.tools.join("ffmpeg.exe"));
         command
             .args(["-v", "error", "-i"])

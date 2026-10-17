@@ -25,6 +25,12 @@ pub struct Model {
     pub max_references: usize,
     pub duration: Option<f64>,
     pub aspect: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub aspects: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub image_sizes: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub durations: Option<Vec<f64>>,
 }
 
 pub fn describe(id: &str, description: &str) -> Model {
@@ -53,6 +59,9 @@ pub fn describe(id: &str, description: &str) -> Model {
         kind: if image { "image" } else if video { "video" } else if text { "text" } else { "unknown" }.into(),
         max_references: references,
         duration,
+        aspects: None,
+        image_sizes: None,
+        durations: None,
         aspect: if id.contains("portrait") {
             Some("9:16".into())
         } else if id.contains("landscape") {
@@ -127,12 +136,57 @@ pub fn models(connection: &Connection, key: &str) -> Result<Vec<Model>> {
     Ok(rows
         .iter()
         .filter_map(|item| {
-            Some(describe(
-                item["id"].as_str()?,
-                item["description"].as_str().unwrap_or(""),
-            ))
+            let id = item["id"].as_str()?;
+            if id == "gflow-project-control" { return None; }
+            let mut model = describe(id, item["description"].as_str().unwrap_or(""));
+            apply_model_metadata(&mut model, item);
+            Some(model)
         })
         .collect())
+}
+
+pub fn apply_model_metadata(model: &mut Model, value: &Value) {
+    if let Some(kind) = value["kind"].as_str().filter(|s| matches!(*s, "image" | "video" | "text" | "unknown")) { model.kind = kind.into(); }
+    if let Some(max) = value["maxReferences"].as_u64() { model.max_references = max.min(32) as usize; }
+    model.aspects = value["aspects"].as_array().map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect()).or(model.aspects.take());
+    model.image_sizes = value["imageSizes"].as_array().map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect()).or(model.image_sizes.take());
+    model.durations = value["durations"].as_array().map(|items| items.iter().filter_map(Value::as_f64).filter(|n| n.is_finite() && *n > 0.0).collect()).or(model.durations.take());
+}
+
+fn control_http_error(error: ureq::Error) -> Error {
+    if let ureq::Error::Status(status, response) = error {
+        if let Ok(payload) = serde_json::from_reader::<_, Value>(response.into_reader().take(1_000_000)) {
+            if payload["error"].is_object() {
+                return Error::new(payload["error"]["code"].as_str().unwrap_or("provider_error"), provider_message(&payload));
+            }
+        }
+        Error::new(match status { 401 | 403 => "provider_unauthorized", 402 => "insufficient_credit", 429 => "rate_limited", _ => "provider_error" },
+            format!("项目控制服务返回 HTTP {status}，请检查插件与账号状态"))
+    } else { http_error(error) }
+}
+
+/// Dedicated, non-media Chat Completions control request. It never uses generation parsing.
+pub fn project_control(connection: &Connection, key: &str, control: &Value) -> Result<Value> {
+    let response = ureq::AgentBuilder::new().redirects(0)
+        .timeout_connect(Duration::from_secs(15)).timeout_read(Duration::from_secs(120))
+        .timeout(Duration::from_secs(180)).build()
+        .post(&format!("{}/chat/completions", base_url(&connection.base_url)?))
+        .set("Authorization", &format!("Bearer {key}"))
+        .send_json(json!({"model":"gflow-project-control","stream":false,
+            "messages":[{"role":"user","content":control.to_string()}]}))
+        .map_err(control_http_error)?;
+    let payload: Value = serde_json::from_reader(response.into_reader().take(2_000_000))
+        .map_err(|_| Error::new("result_unknown", "项目控制响应无效，请核查原操作结果"))?;
+    if payload.get("error").is_some() { return Err(Error::new(
+        payload["error"]["code"].as_str().unwrap_or("provider_error"), provider_message(&payload))); }
+    let content = payload["choices"][0]["message"]["content"].as_str()
+        .ok_or_else(|| Error::new("project_binding_unavailable", "服务不支持项目控制协议，请更新 GFlow 插件"))?;
+    let value: Value = serde_json::from_str(content)
+        .map_err(|_| Error::new("result_unknown", "项目控制内容无效，请核查原操作结果"))?;
+    if value["version"] != 1 { return Err(Error::new("project_binding_unavailable", "项目控制协议版本不兼容")); }
+    if value.get("error").is_some() { return Err(Error::new(
+        value["error"]["code"].as_str().unwrap_or("provider_error"), provider_message(&value))); }
+    Ok(value)
 }
 
 pub fn reference_data(path: &Path) -> Result<String> {
@@ -281,7 +335,7 @@ pub fn generate(
     let model = crate::required(request, "model")?;
     let prompt = crate::required(request, "prompt")?;
     let capability = describe(model, "");
-    if capability.kind == "text" {
+    if capability.kind == "text" || model == "gflow-project-control" {
         return Err(Error::new("invalid_request", "这是文本模型，请选择图片或视频生成模型"));
     }
     let references = request["references"].as_array().cloned().unwrap_or_default();
@@ -295,7 +349,7 @@ pub fn generate(
     }
     let mut payload = json!({"model":model,"messages":[{"role":"user","content":content}],"stream":request["stream"].as_bool().unwrap_or(true)});
     if model.starts_with("gflow-") && url::Url::parse(&connection.base_url).is_ok_and(|url| matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))) { payload["client_process_id"] = json!(std::process::id()); }
-    for field in ["aspect_ratio", "duration", "quality", "image_size", "client_request_id"] {
+    for field in ["aspect_ratio", "duration", "quality", "image_size", "client_request_id", "gflow_workspace_id", "gflow_project_id", "gflow_instance_id"] {
         if let Some(value) = request.get(field).filter(|value| !value.is_null() && value.as_str() != Some("auto")) { payload[field] = value.clone(); }
     }
     if model.starts_with("gflow-") || model.contains("gemini") || model.contains("banana") {

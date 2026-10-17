@@ -23,7 +23,7 @@ fn run() -> Result<()> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     if arguments.is_empty() || arguments.iter().any(|value| value == "--help") {
         println!(
-            "cutflow-agent 0.4.1\n  mcp [--portable DIR]\n  call METHOD --params FILE [--portable DIR]\n  call METHOD --stdin [--portable DIR]\n  schema\nOpen CutFlow independently. Main window and editor provide separate local token channels. No Python or AI application is required to keep CutFlow running."
+            "cutflow-agent {}\n  mcp [--portable DIR]\n  call METHOD --params FILE [--portable DIR]\n  call METHOD --stdin [--portable DIR]\n  schema\nOpen CutFlow independently. Main window and editor provide separate local token channels. No Python or AI application is required to keep CutFlow running.", env!("CARGO_PKG_VERSION")
         );
         return Ok(());
     }
@@ -53,7 +53,7 @@ fn run() -> Result<()> {
             }
             let result = match request["method"].as_str().unwrap_or("") {
                 "initialize" => Ok(
-                    json!({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"CutFlow","version":"0.4.1"}}),
+                    json!({"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"CutFlow","version":env!("CARGO_PKG_VERSION")}}),
                 ),
                 "ping" => Ok(json!({})),
                 "tools/list" => Ok(json!({"tools":protocol::tools()})),
