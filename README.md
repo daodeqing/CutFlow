@@ -4,7 +4,7 @@ CutFlow 0.5 以 BDL 原有 Vue/Tauri 界面提供 B站账号登录与下载，�
 
 ## 使用
 
-1. 从本仓库 Actions 的成功构建下载 `CutFlow-0.5.0-windows-x64` Artifact，解压其中的便携 ZIP，启动 `CutFlow.exe`；也可运行 Setup。EXE、DLL、tools 和 WebView2 必须保持完整。
+1. 从[最新发行版](https://github.com/daodeqing/CutFlow/releases/latest)下载 Setup 安装版或便携 ZIP，选择一种即可。便携版完整解压后启动 `CutFlow.exe`。EXE、DLL、tools 和 WebView2 必须保持完整。
 2. 「B站素材」复用 BDL 的账号菜单、扫码登录、链接解析、多 P、收藏夹和下载队列。完成下载后，从任务的更多操作中选择「加入剪辑」。
 3. 在「设置 → AI 服务」填写已有兼容服务地址和密钥，检查连接后进入「AI 创作」，选择或手填模型 ID。无需先创建工程，结果可预览、打开本地文件或加入剪辑。比例和时长由模型变体或服务决定。
 4. 默认突出日常剪辑；检查器「进阶」展开特效、增强和调色。高级效果与旧工程格式保留。
