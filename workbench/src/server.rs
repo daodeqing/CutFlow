@@ -88,6 +88,9 @@ impl Drop for Server {
 }
 
 fn serve(mut stream: TcpStream, token: &str, dispatch: Dispatch) -> Result<()> {
+    // Windows accept 可能继承监听器的非阻塞状态。工作线程需要等待完整 JSON 行，
+    // 否则连接刚建立或数据分段到达时会触发 WSAEWOULDBLOCK 并提前断开。
+    stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
     let mut line = String::new();
@@ -170,4 +173,52 @@ fn call_direct(root: &Path, request: &Call) -> Result<Value> {
         ));
     }
     Ok(response["result"].clone())
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn delayed_request(split: bool) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        // 明确设置非阻塞，确保在 Windows 和其他平台都能复现旧实现的错误。
+        stream.set_nonblocking(true).unwrap();
+        let worker = std::thread::spawn(move || {
+            serve(stream, "fixture-token", Arc::new(|call| {
+                assert_eq!(call.method, "cutflow.project.current");
+                Ok(json!({"ready":true}))
+            }))
+        });
+        std::thread::sleep(Duration::from_millis(80));
+        let request = json!({"id":7,"method":"cutflow.project.current","params":{},"token":"fixture-token"}).to_string();
+        if split {
+            let middle = request.len() / 2;
+            client.write_all(&request.as_bytes()[..middle]).unwrap();
+            std::thread::sleep(Duration::from_millis(80));
+            client.write_all(&request.as_bytes()[middle..]).unwrap();
+        } else {
+            client.write_all(request.as_bytes()).unwrap();
+        }
+        client.write_all(b"\n").unwrap();
+        let mut response = String::new();
+        BufReader::new(client).read_line(&mut response).unwrap();
+        let response: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["id"], 7);
+        assert_eq!(response["result"]["ready"], true);
+        worker.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn accepted_connection_waits_for_request_bytes() {
+        delayed_request(false);
+    }
+
+    #[test]
+    fn accepted_connection_waits_for_split_json_line() {
+        delayed_request(true);
+    }
 }

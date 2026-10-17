@@ -185,6 +185,7 @@ def verify(stage):
                     'video':{'width':1280,'height':720,'rateNum':25,'rateDen':1}
                 }, ensure_ascii=False), encoding='utf-8')
                 call('cutflow.editor.open', {'projectPath':str(project)})
+                editor = json.loads((portable / 'editor/automation.json').read_text())['process']
                 current = call('cutflow.project.current')
                 assert os.path.samefile(current['projectPath'], project)
                 recents = call('cutflow.editor.recents')
