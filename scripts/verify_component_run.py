@@ -35,7 +35,7 @@ def verify():
 
     sha = source['head_sha']
     subprocess.run(['git', 'fetch', '--no-tags', '--depth=1', 'origin', sha], check=True)
-    changed = subprocess.check_output(['git', 'diff', '--name-only', sha, 'HEAD'], text=True).splitlines()
+    changed = subprocess.check_output(['git', '-c', 'core.quotepath=false', 'diff', '--name-only', sha, 'HEAD'], text=True).splitlines()
     packaging_files = {
         '.github/workflows/windows.yml', 'scripts/build_windows.py',
         'scripts/CutFlow.iss', 'scripts/verify_component_run.py',
