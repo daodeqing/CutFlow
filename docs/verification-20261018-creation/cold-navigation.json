@@ -1,0 +1,5 @@
+{
+  "environment": "Local Chromium, Vite dev server, simulated Tauri. Not WebView2.",
+  "injectedModuleDelayMs": 500,
+  "clickToLoadingDomMs": 1.899999976158142
+}

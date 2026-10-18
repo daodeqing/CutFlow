@@ -1,0 +1,20 @@
+2026-10-18T01:56:41.0023918Z Received 1207959552 of 3170421220 (38.1%), 74.8 MBs/sec
+2026-10-18T01:59:22.3973657Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 3.54s
+2026-10-18T01:59:22.4134531Z test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+2026-10-18T01:59:22.5274495Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T01:59:56.6539140Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 34.06s
+2026-10-18T01:59:56.8468724Z test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+2026-10-18T01:59:56.8551258Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T01:59:57.4800649Z test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+2026-10-18T01:59:57.6087571Z test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+2026-10-18T01:59:57.8277598Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:00:18.2077655Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 20.33s
+2026-10-18T02:00:30.6902473Z     Finished `dev` profile [unoptimized + debuginfo] target(s) in 12.42s
+2026-10-18T02:00:45.3070166Z     Finished `test` profile [unoptimized + debuginfo] target(s) in 13.35s
+2026-10-18T02:00:45.3750725Z test result: ok. 114 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+2026-10-18T02:00:45.7343580Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:03:00.3924945Z     Finished `release` profile [optimized] target(s) in 2m 14s
+2026-10-18T02:04:44.0979032Z     Finished `release` profile [optimized] target(s) in 1m 43s
+2026-10-18T02:11:23.6523943Z     |        ^^^^^^^
+2026-10-18T02:28:24.6587942Z     Finished `app` profile [optimized] target(s) in 23m 40s
+2026-10-18T02:28:43.2398531Z Uploaded bytes 176160768

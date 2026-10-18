@@ -1,0 +1,18 @@
+{
+  "records": [
+    {
+      "path": ".build\\navigation-compare-20261018",
+      "bytes": 45524511,
+      "sizeMiB": 43.416,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\navigation-compare-20261018-r2",
+      "bytes": 205595947,
+      "sizeMiB": 196.072,
+      "status": "recycled"
+    }
+  ],
+  "totalBytes": 251120458,
+  "completed": true
+}

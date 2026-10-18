@@ -1,0 +1,86 @@
+{
+  "version": "0.6.0",
+  "date": "2026-10-18",
+  "environment": "Local Chromium headless shell, Vite development server, simulated Tauri. Not native WebView2 or live Google Flow.",
+  "uniqueBrowserCases": 16,
+  "uniqueCasesWithPassingEvidence": 16,
+  "latestFullRun": {
+    "passed": 15,
+    "failed": 1,
+    "total": 16,
+    "failure": "Cached creation workspace lost the earlier reading position."
+  },
+  "afterRepair": {
+    "passed": 2,
+    "failed": 0,
+    "cases": [
+      "cached reading position",
+      "new result while reading above and explicit return to bottom"
+    ]
+  },
+  "pageErrors": 0,
+  "screenshots": [
+    {
+      "file": "creation-heavy-windowed.png",
+      "bytes": 300122,
+      "sha256": "83b74b2ec3e3f61de975ad6460e81c59bd1ca2133a80389d68522f6a5b68e890",
+      "visuallyInspected": true
+    },
+    {
+      "file": "creation-parameter-drawer-dark-390.png",
+      "bytes": 70087,
+      "sha256": "8282b49a804e678084a7040b336c7fd4b3b64309130f25dbc0100a26184eaf45",
+      "visuallyInspected": true
+    },
+    {
+      "file": "creation-parameter-drawer-light-390.png",
+      "bytes": 72030,
+      "sha256": "f73d5ee155748071c8d598e51cc8f808b0cdaaac01f2652ad18b23bfc072a06c",
+      "visuallyInspected": true
+    },
+    {
+      "file": "creation-project-drawer-dark-390.png",
+      "bytes": 57244,
+      "sha256": "3b91bc7ec28874ff022df6d32de0883c311342cd5533806ec7e77733226c9092",
+      "visuallyInspected": true
+    },
+    {
+      "file": "creation-project-drawer-light-390.png",
+      "bytes": 57030,
+      "sha256": "4c41513e52387709facb0d3dfc13fe03d6167940fbc1d2a5f7c7010ece581eca",
+      "visuallyInspected": true
+    },
+    {
+      "file": "creation-studio-dark-1024.png",
+      "bytes": 238269,
+      "sha256": "90395339e2c56078d93d66dfbd5f4d0749316a8188b171856323389cc1e2bc42",
+      "visuallyInspected": true
+    },
+    {
+      "file": "creation-studio-dark-1440.png",
+      "bytes": 299047,
+      "sha256": "75b38bed2825254bb4155d1beb0b36220dab6c05077755f230f7fb51482c03de",
+      "visuallyInspected": true
+    },
+    {
+      "file": "creation-studio-light-1024.png",
+      "bytes": 245551,
+      "sha256": "72d010e5e1087623588cb7023e7e5b1647d9af8c0bdc67bc83be513a1ef97d32",
+      "visuallyInspected": true
+    },
+    {
+      "file": "creation-studio-light-1440.png",
+      "bytes": 312217,
+      "sha256": "61d2d9e36c224f113cde2fec2013f825f730d0bf0ce9a77a9b1d0e8bb6dfca0d",
+      "visuallyInspected": true
+    }
+  ],
+  "performance": {
+    "medianMs": 42.79999998211861,
+    "p95Ms": 76.09999999403954,
+    "maxMs": 76.59999999403954
+  },
+  "coldModuleDelayMs": 500,
+  "clickToLoadingDomMs": 1.899999976158142,
+  "paidGenerationCalls": 0
+}

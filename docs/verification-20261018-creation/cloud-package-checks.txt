@@ -1,0 +1,45 @@
+2026-10-18T02:34:29.1275754Z Successfully set up CPython (3.12.10)
+2026-10-18T02:34:34.8611107Z Successfully installed psutil-7.2.2
+2026-10-18T02:34:35.0705706Z ##[group]Run python -B -X utf8 scripts/verify_component_run.py
+2026-10-18T02:34:35.0706272Z python -B -X utf8 scripts/verify_component_run.py
+2026-10-18T02:34:35.0751927Z   CUTFLOW_COMPONENT_RUN: 39088247743
+2026-10-18T02:34:37.0329160Z Verified successful hub/editor from run 39088247743, source 4ea187edf2c308ef9fb7777a907a8556b14075d0; only packaging changed
+2026-10-18T02:34:37.1676269Z   name: CutFlow-component-hub
+2026-10-18T02:34:37.6676615Z - CutFlow-component-hub (ID: 12121429694, Size: 742080095, Expected Digest: sha256:51c99ff4516412ae321861e55a4d3e3fa8bf45e8b4ae1007c8770faf97da5db3)
+2026-10-18T02:34:51.0353091Z SHA256 digest of downloaded artifact is 51c99ff4516412ae321861e55a4d3e3fa8bf45e8b4ae1007c8770faf97da5db3
+2026-10-18T02:34:51.0354468Z Artifact download completed successfully.
+2026-10-18T02:34:51.0364317Z Download artifact has finished successfully
+2026-10-18T02:34:51.0674629Z   name: CutFlow-component-editor
+2026-10-18T02:34:51.5318295Z - CutFlow-component-editor (ID: 12122840647, Size: 652819289, Expected Digest: sha256:c02d273998b4e1b9906900e85e1ea4947a852d54774fbbdd5d0edb07044d9f22)
+2026-10-18T02:35:09.4309172Z SHA256 digest of downloaded artifact is c02d273998b4e1b9906900e85e1ea4947a852d54774fbbdd5d0edb07044d9f22
+2026-10-18T02:35:09.4310559Z Artifact download completed successfully.
+2026-10-18T02:35:09.4319816Z Download artifact has finished successfully
+2026-10-18T02:35:09.9071398Z ##[group]Run python -B -X utf8 scripts/build_windows.py --component package --installer
+2026-10-18T02:35:09.9072128Z python -B -X utf8 scripts/build_windows.py --component package --installer
+2026-10-18T02:35:20.9315105Z Running D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\CutFlow-editor.exe --smoke
+2026-10-18T02:35:21.7025050Z 2026-10-18 02:35:21.586Z INFO  [main] concat::studio: project: opening D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\portable\editor\smoke-checks\2028-1792290921585632500\control-a
+2026-10-18T02:35:21.7030406Z 2026-10-18 02:35:21.599Z INFO  [main] concat::studio: project: opening D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\portable\editor\smoke-checks\2028-1792290921585632500\control-b
+2026-10-18T02:35:21.7034254Z 2026-10-18 02:35:21.600Z INFO  [main] concat::studio: project: opening D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\portable\editor\smoke-checks\2028-1792290921585632500\control-a
+2026-10-18T02:35:22.0109588Z 2026-10-18 02:35:22.005Z INFO  [main] concat: smoke: ok
+2026-10-18T02:35:22.5466630Z Running C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe -B tests/check_windows_startup.py --exe D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\CutFlow.exe --state-dir D:\a\CutFlow\CutFlow\.build\CutFlow.exe-startup
+2026-10-18T02:35:26.4256630Z PASS: window visible and responsive; log: D:\a\CutFlow\CutFlow\.build\CutFlow.exe-startup\gui-startup.log
+2026-10-18T02:35:26.4351440Z Running C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe -B tests/check_windows_startup.py --exe D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\CutFlow-editor.exe --state-dir D:\a\CutFlow\CutFlow\.build\CutFlow-editor.exe-startup
+2026-10-18T02:35:32.0683194Z PASS: window visible and responsive; log: D:\a\CutFlow\CutFlow\.build\CutFlow-editor.exe-startup\gui-startup.log
+2026-10-18T02:35:32.0684452Z Running D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\CutFlow-editor.exe --smoke
+2026-10-18T02:35:33.1472100Z 2026-10-18 02:35:32.355Z INFO  [main] concat::studio: project: opening D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\portable\editor\smoke-checks\5972-1792290932354457900\control-a
+2026-10-18T02:35:33.1475388Z 2026-10-18 02:35:32.369Z INFO  [main] concat::studio: project: opening D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\portable\editor\smoke-checks\5972-1792290932354457900\control-b
+2026-10-18T02:35:33.1477623Z 2026-10-18 02:35:32.370Z INFO  [main] concat::studio: project: opening D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\portable\editor\smoke-checks\5972-1792290932354457900\control-a
+2026-10-18T02:35:33.1485789Z 2026-10-18 02:35:32.717Z INFO  [main] concat: smoke: ok
+2026-10-18T02:35:33.1487700Z Running C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe -B tests/check_windows_startup.py --exe D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\CutFlow-editor.exe --state-dir D:\a\CutFlow\CutFlow\.build\editor-software-startup
+2026-10-18T02:35:38.6694615Z PASS: window visible and responsive; log: D:\a\CutFlow\CutFlow\.build\editor-software-startup\gui-startup.log
+2026-10-18T02:35:58.4649740Z PASS: mock OpenAI models, reference upload, image/video, four image API outputs, no-project generation, replay, broken stream, quota, download-only retry, no leaked media key; independent editor verified
+2026-10-18T02:37:21.9927351Z    Verification successful
+2026-10-18T02:37:22.1035027Z    Verification successful
+2026-10-18T02:40:45.8696338Z    Compressing: D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\WebView2\microsoft_shell_integration.dll
+2026-10-18T02:43:12.6225197Z    Compressing: D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64\WebView2\webview2_integration.dll
+2026-10-18T02:43:55.6001836Z Successful compile (394.157 sec). Resulting Setup program filename is:
+2026-10-18T02:43:56.6387941Z Built D:\a\CutFlow\CutFlow\dist\CutFlow-0.6.0-windows-x64.zip
+dist/*.sha256
+2026-10-18T02:44:11.7121271Z SHA256 digest of uploaded artifact zip is e86a96fb01f2630048a8367660a8702a34ee8a905b2a3ebdaddc592adf610b4b
+2026-10-18T02:44:12.0424198Z Artifact CutFlow-0.6.0-windows-x64.zip successfully finalized. Artifact ID 12123150717
+2026-10-18T02:44:12.0425956Z Artifact CutFlow-0.6.0-windows-x64 has been successfully uploaded! Final size is 1018137511 bytes. Artifact ID is 12123150717

@@ -1,0 +1,74 @@
+{
+  "repo": "daodeqing/CutFlow",
+  "artifactId": 12123150717,
+  "artifactName": "CutFlow-0.6.0-windows-x64",
+  "artifactBytes": 1018137511,
+  "cloudRun": {
+    "id": 39090561957,
+    "repository_id": 1420347123,
+    "head_repository_id": 1420347123,
+    "head_branch": "main",
+    "head_sha": "b9e9320b8832ba10d5403c5d6fd12770887f4b91"
+  },
+  "entries": [
+    {
+      "name": "CutFlow-0.6.0-windows-x64-setup.exe",
+      "bytes": 426539238
+    },
+    {
+      "name": "CutFlow-0.6.0-windows-x64-setup.exe.sha256",
+      "bytes": 103
+    },
+    {
+      "name": "CutFlow-0.6.0-windows-x64.zip",
+      "bytes": 591597399
+    },
+    {
+      "name": "CutFlow-0.6.0-windows-x64.zip.sha256",
+      "bytes": 97
+    }
+  ],
+  "checksums": {
+    "CutFlow-0.6.0-windows-x64-setup.exe.sha256": "0771333fb410e94246c260511865568431a08bf22790689bc0c13060b895ad0e  CutFlow-0.6.0-windows-x64-setup.exe",
+    "CutFlow-0.6.0-windows-x64.zip.sha256": "0ee871d43c03a02c14afc49dd1e6f3af1c4f8b1eae42d2629cdd0fa52f9e0a0c  CutFlow-0.6.0-windows-x64.zip"
+  },
+  "buildInfo": {
+    "version": "0.6.0",
+    "commit": "b9e9320b8832ba10d5403c5d6fd12770887f4b91",
+    "cloud_run": "39090561957",
+    "files": {
+      "CutFlow.exe": {
+        "bytes": 36510720,
+        "sha256": "21eef0acce23a5bfc2b501fabd46f5e316a80d9531d515df0b9acf17b0ef3a12"
+      },
+      "CutFlow-editor.exe": {
+        "bytes": 95934976,
+        "sha256": "c4d72c2145bdc3edf7085637bf69cd75d9528c043e8db2cb548b66279b897c82"
+      },
+      "tools/concat.exe": {
+        "bytes": 95934976,
+        "sha256": "c4d72c2145bdc3edf7085637bf69cd75d9528c043e8db2cb548b66279b897c82"
+      },
+      "tools/cutflow-agent.exe": {
+        "bytes": 2422272,
+        "sha256": "246d47fc5ab513d05365637f862803507448a4ad836dc1b8526ca5150765bcb0"
+      },
+      "tools/bdl.exe": {
+        "bytes": 11147776,
+        "sha256": "7c497c30926f03a1a59d6c3e36a2f5b8d6a0f0d8ca95fd539d177ac071e55db0"
+      }
+    }
+  },
+  "requiredFilesPresent": true,
+  "portableEmpty": true,
+  "projectGuidePresent": true,
+  "usageGuideVersion06": true,
+  "rangeBytesTransferred": 20417447,
+  "executableCheck": {
+    "path": "D:\\LUO\\video editing\\CutFlow\\.build\\creation-final-exe\\CutFlow.exe",
+    "sha256": "21eef0acce23a5bfc2b501fabd46f5e316a80d9531d515df0b9acf17b0ef3a12",
+    "bytes": 36510720,
+    "matchedManifest": true
+  },
+  "boundary": "ZIP directory and small-file CRC checked; large deliverable SHA files read, not independently recomputed."
+}

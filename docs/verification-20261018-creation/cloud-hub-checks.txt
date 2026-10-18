@@ -1,0 +1,26 @@
+2026-10-18T02:00:35.3566680Z [2m Test Files [22m [1m[32m58 passed[39m[22m[90m (58)[39m
+2026-10-18T02:01:52.8318329Z test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+2026-10-18T02:01:52.8589066Z test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+2026-10-18T02:01:52.8684736Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:52.8783859Z test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:52.8884472Z test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:52.8991598Z test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:52.9096802Z test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:52.9200035Z test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:54.1276683Z test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.20s
+2026-10-18T02:01:56.2811732Z test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.14s
+2026-10-18T02:01:56.2939281Z test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:56.4941351Z test result: ok. 12 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.19s
+2026-10-18T02:01:56.5022605Z test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:56.5105501Z test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:56.5205495Z test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:56.5407195Z test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+2026-10-18T02:01:56.5497485Z test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:56.5712164Z test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+2026-10-18T02:01:57.5071874Z test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.93s
+2026-10-18T02:01:57.5179077Z test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:57.5311343Z test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:01:58.2921488Z test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:02:18.7674538Z test result: ok. 129 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 1.38s
+2026-10-18T02:02:44.6945590Z test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+2026-10-18T02:08:15.0091139Z     Finished `release` profile [optimized] target(s) in 5m 30s

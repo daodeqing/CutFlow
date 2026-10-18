@@ -1,0 +1,16 @@
+{
+  "componentCommit": "4ea187edf2c308ef9fb7777a907a8556b14075d0",
+  "packageCommit": "b9e9320b8832ba10d5403c5d6fd12770887f4b91",
+  "changedFiles": [
+    "docs/creation-projects.md",
+    "docs/创作与外部AI.md",
+    "docs/验收与已知限制.md",
+    "scripts/build_windows.py",
+    "scripts/verify_component_run.py"
+  ],
+  "runtimeSourcesChanged": false,
+  "binaryReuseGate": "scripts/verify_component_run.py additionally requires both successful component jobs",
+  "componentRun": 39088247743,
+  "packageRun": 39090561957,
+  "previousPackageCancelled": "Both component jobs succeeded; original package superseded to include updated guides"
+}

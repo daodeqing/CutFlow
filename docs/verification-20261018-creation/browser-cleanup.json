@@ -1,0 +1,74 @@
+[
+  {
+    "path": ".build\\creation-playwright",
+    "bytes": 2403238,
+    "sizeMiB": 2.292,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-playwright-cache-repair",
+    "bytes": 45,
+    "sizeMiB": 0.0,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-playwright-cold",
+    "bytes": 45,
+    "sizeMiB": 0.0,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-playwright-complete",
+    "bytes": 2354003,
+    "sizeMiB": 2.245,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-playwright-final",
+    "bytes": 21744364,
+    "sizeMiB": 20.737,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-playwright-repair",
+    "bytes": 45,
+    "sizeMiB": 0.0,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-playwright-scroll",
+    "bytes": 2423086,
+    "sizeMiB": 2.311,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-playwright-verified",
+    "bytes": 45,
+    "sizeMiB": 0.0,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-browser",
+    "bytes": 286315769,
+    "sizeMiB": 273.052,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-server.json",
+    "bytes": 14,
+    "sizeMiB": 0.0,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-server.log",
+    "bytes": 4378,
+    "sizeMiB": 0.004,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation_ci_monitor.py",
+    "bytes": 3990,
+    "sizeMiB": 0.004,
+    "status": "recycled"
+  }
+]

@@ -1,0 +1,140 @@
+{
+  "measuredAt": "2026-10-17T17:33:47.349Z",
+  "browser": "chromium",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "environment": "Local Chromium, Vite development server, simulated Tauri API. Not WebView2 and not live Google Flow.",
+  "definition": "Navigation DOM click dispatch until target workspace exists without loading indicator, followed by two requestAnimationFrame callbacks. Actionability and driver transport excluded.",
+  "fixture": {
+    "serverSessions": 500,
+    "serverHistoricalTurns": 1000,
+    "loadedTurns": 50
+  },
+  "medianMs": 42.79999998211861,
+  "p95Ms": 76.09999999403954,
+  "maxMs": 76.59999999403954,
+  "samples": [
+    {
+      "tab": "bilibili",
+      "durationMs": 57.19999998807907
+    },
+    {
+      "tab": "editor",
+      "durationMs": 42.29999998211861
+    },
+    {
+      "tab": "settings",
+      "durationMs": 44.19999998807907
+    },
+    {
+      "tab": "about",
+      "durationMs": 42.89999997615814
+    },
+    {
+      "tab": "creation",
+      "durationMs": 46.900000005960464
+    },
+    {
+      "tab": "bilibili",
+      "durationMs": 43.70000001788139
+    },
+    {
+      "tab": "editor",
+      "durationMs": 41.900000005960464
+    },
+    {
+      "tab": "settings",
+      "durationMs": 41.69999998807907
+    },
+    {
+      "tab": "about",
+      "durationMs": 42.79999998211861
+    },
+    {
+      "tab": "creation",
+      "durationMs": 52.70000001788139
+    },
+    {
+      "tab": "bilibili",
+      "durationMs": 40.10000002384186
+    },
+    {
+      "tab": "editor",
+      "durationMs": 76.09999999403954
+    },
+    {
+      "tab": "settings",
+      "durationMs": 76.59999999403954
+    },
+    {
+      "tab": "about",
+      "durationMs": 42
+    },
+    {
+      "tab": "creation",
+      "durationMs": 49.20000001788139
+    },
+    {
+      "tab": "bilibili",
+      "durationMs": 40
+    },
+    {
+      "tab": "editor",
+      "durationMs": 75
+    },
+    {
+      "tab": "settings",
+      "durationMs": 40.80000001192093
+    },
+    {
+      "tab": "about",
+      "durationMs": 42.5
+    },
+    {
+      "tab": "creation",
+      "durationMs": 54.5
+    },
+    {
+      "tab": "bilibili",
+      "durationMs": 40.099999994039536
+    },
+    {
+      "tab": "editor",
+      "durationMs": 42.60000002384186
+    },
+    {
+      "tab": "settings",
+      "durationMs": 59.89999997615814
+    },
+    {
+      "tab": "about",
+      "durationMs": 41.5
+    },
+    {
+      "tab": "creation",
+      "durationMs": 49.599999994039536
+    },
+    {
+      "tab": "bilibili",
+      "durationMs": 36.70000001788139
+    },
+    {
+      "tab": "editor",
+      "durationMs": 41.599999994039536
+    },
+    {
+      "tab": "settings",
+      "durationMs": 42.69999998807907
+    },
+    {
+      "tab": "about",
+      "durationMs": 40.400000005960464
+    },
+    {
+      "tab": "creation",
+      "durationMs": 68.80000001192093
+    }
+  ]
+}

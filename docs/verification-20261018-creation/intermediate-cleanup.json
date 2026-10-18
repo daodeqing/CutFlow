@@ -1,0 +1,26 @@
+[
+  {
+    "path": ".build\\tmp",
+    "bytes": 69666735,
+    "sizeMiB": 66.439,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\cache",
+    "bytes": 0,
+    "sizeMiB": 0.0,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\npm",
+    "bytes": 0,
+    "sizeMiB": 0.0,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-cloud-hub",
+    "bytes": 742038067,
+    "sizeMiB": 707.663,
+    "status": "recycled"
+  }
+]

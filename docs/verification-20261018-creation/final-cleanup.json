@@ -1,0 +1,20 @@
+[
+  {
+    "path": ".build\\navigation-final-verified",
+    "bytes": 205534846,
+    "sizeMiB": 196.013,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-final-exe",
+    "bytes": 36510720,
+    "sizeMiB": 34.819,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\creation-gh",
+    "bytes": 41483064,
+    "sizeMiB": 39.561,
+    "status": "recycled"
+  }
+]

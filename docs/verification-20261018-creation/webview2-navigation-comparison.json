@@ -1,0 +1,2023 @@
+{
+  "runtimeDirectory": "D:\\LUO\\video editing\\dist\\CutFlow\\WebView2",
+  "runtimeSha256": "46b3c6ac9169416cc2ee76b23ee3d9db0eb8daefb914b1d9cc0f5d2387b033ac",
+  "runtimeFileVersion": "155.0.4283.45",
+  "results": [
+    {
+      "version": {
+        "protocolVersion": "1.3",
+        "product": "Edg/155.0.4283.45",
+        "revision": "@50f24ef2aa5369a074b8888b7db82d9c0652d642",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+        "jsVersion": "15.5.9.4"
+      },
+      "viewport": {
+        "width": 1426,
+        "height": 892,
+        "dpr": 1.25
+      },
+      "rendered": {
+        "domNodes": 240,
+        "activeTab": "bilibili"
+      },
+      "errors": [],
+      "measurements": [
+        {
+          "phase": "cold",
+          "index": 0,
+          "tab": "creation",
+          "firstFrameMs": 487.19999998807907,
+          "settledMs": 572.6999999880791,
+          "firstKind": "content"
+        },
+        {
+          "phase": "cold",
+          "index": 1,
+          "tab": "editor",
+          "firstFrameMs": 239.5,
+          "settledMs": 345,
+          "firstKind": "content"
+        },
+        {
+          "phase": "cold",
+          "index": 2,
+          "tab": "settings",
+          "firstFrameMs": 323.5,
+          "settledMs": 429,
+          "firstKind": "content"
+        },
+        {
+          "phase": "cold",
+          "index": 3,
+          "tab": "about",
+          "firstFrameMs": 217.59999999403954,
+          "settledMs": 323.09999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "creation",
+          "firstFrameMs": 212.19999998807907,
+          "settledMs": 317.69999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "editor",
+          "firstFrameMs": 206.5,
+          "settledMs": 312,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "settings",
+          "firstFrameMs": 212.2999999821186,
+          "settledMs": 317.7999999821186,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "about",
+          "firstFrameMs": 206.80000001192093,
+          "settledMs": 312.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "bilibili",
+          "firstFrameMs": 206.40000000596046,
+          "settledMs": 312,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "creation",
+          "firstFrameMs": 213.5,
+          "settledMs": 318.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "editor",
+          "firstFrameMs": 206.2000000178814,
+          "settledMs": 311.7000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "settings",
+          "firstFrameMs": 212.40000000596046,
+          "settledMs": 317.90000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "about",
+          "firstFrameMs": 206.90000000596046,
+          "settledMs": 312.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "bilibili",
+          "firstFrameMs": 207,
+          "settledMs": 312.59999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "creation",
+          "firstFrameMs": 207.59999999403954,
+          "settledMs": 312.90000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "editor",
+          "firstFrameMs": 206.89999997615814,
+          "settledMs": 312.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "settings",
+          "firstFrameMs": 212.5,
+          "settledMs": 317.80000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "about",
+          "firstFrameMs": 206.80000001192093,
+          "settledMs": 312.30000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "bilibili",
+          "firstFrameMs": 209.7000000178814,
+          "settledMs": 312.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "creation",
+          "firstFrameMs": 212.90000000596046,
+          "settledMs": 318.2000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "editor",
+          "firstFrameMs": 206.90000000596046,
+          "settledMs": 312.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "settings",
+          "firstFrameMs": 212.90000000596046,
+          "settledMs": 318.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "about",
+          "firstFrameMs": 205.80000001192093,
+          "settledMs": 311.30000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "bilibili",
+          "firstFrameMs": 206.69999998807907,
+          "settledMs": 312.30000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "creation",
+          "firstFrameMs": 212.69999998807907,
+          "settledMs": 318.39999997615814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "editor",
+          "firstFrameMs": 206.7000000178814,
+          "settledMs": 312.2000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "settings",
+          "firstFrameMs": 212.40000000596046,
+          "settledMs": 317.90000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "about",
+          "firstFrameMs": 207.09999999403954,
+          "settledMs": 312.80000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "bilibili",
+          "firstFrameMs": 206.90000000596046,
+          "settledMs": 312.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "creation",
+          "firstFrameMs": 207.7000000178814,
+          "settledMs": 313.2000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "editor",
+          "firstFrameMs": 207.09999999403954,
+          "settledMs": 312.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "settings",
+          "firstFrameMs": 212.90000000596046,
+          "settledMs": 318.60000002384186,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "about",
+          "firstFrameMs": 207.2000000178814,
+          "settledMs": 312.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "bilibili",
+          "firstFrameMs": 207.30000001192093,
+          "settledMs": 312.80000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "creation",
+          "firstFrameMs": 207.19999998807907,
+          "settledMs": 312.59999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "editor",
+          "firstFrameMs": 207.19999998807907,
+          "settledMs": 312.69999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "settings",
+          "firstFrameMs": 212.80000001192093,
+          "settledMs": 318.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "about",
+          "firstFrameMs": 205.69999998807907,
+          "settledMs": 311.19999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "bilibili",
+          "firstFrameMs": 207.2000000178814,
+          "settledMs": 312.59999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "creation",
+          "firstFrameMs": 213.09999999403954,
+          "settledMs": 318.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "editor",
+          "firstFrameMs": 206.80000001192093,
+          "settledMs": 312.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "settings",
+          "firstFrameMs": 212.90000000596046,
+          "settledMs": 318.30000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "about",
+          "firstFrameMs": 207.2999999821186,
+          "settledMs": 312.90000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "bilibili",
+          "firstFrameMs": 207.09999999403954,
+          "settledMs": 312.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "creation",
+          "firstFrameMs": 207.19999998807907,
+          "settledMs": 312.80000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "editor",
+          "firstFrameMs": 206.40000000596046,
+          "settledMs": 312,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "settings",
+          "firstFrameMs": 212.80000001192093,
+          "settledMs": 318.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "about",
+          "firstFrameMs": 207.09999999403954,
+          "settledMs": 312.7000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "bilibili",
+          "firstFrameMs": 207,
+          "settledMs": 312.59999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "creation",
+          "firstFrameMs": 208.19999998807907,
+          "settledMs": 313.39999997615814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "editor",
+          "firstFrameMs": 207,
+          "settledMs": 312.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "settings",
+          "firstFrameMs": 212.59999999403954,
+          "settledMs": 318.09999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "about",
+          "firstFrameMs": 207.09999999403954,
+          "settledMs": 312.7999999821186,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "bilibili",
+          "firstFrameMs": 207.30000001192093,
+          "settledMs": 312.7000000178814,
+          "firstKind": "content"
+        }
+      ],
+      "label": "baseline",
+      "scenario": "idle",
+      "fixture": {
+        "jobs": 1000,
+        "sessions": 0,
+        "storeVersion": 1
+      },
+      "sourceProvenance": {
+        "source": "D:\\LUO\\video editing\\dist\\CutFlow\\CutFlow.exe",
+        "version": "0.5.0.0",
+        "sha256": "4a3efce686e9397e0613d3eb11129dd9bb32926e13dae1d3a5a7231727273da0",
+        "buildInfo": {
+          "version": "0.5.0",
+          "commit": "6202e3e68d998714842b8ac79ebb2d1c367f3101",
+          "cloud_run": "39030223570",
+          "files": {
+            "CutFlow.exe": {
+              "bytes": 36175360,
+              "sha256": "4a3efce686e9397e0613d3eb11129dd9bb32926e13dae1d3a5a7231727273da0"
+            },
+            "CutFlow-editor.exe": {
+              "bytes": 95746048,
+              "sha256": "8bb06d4ca20ba25b49c4c77207b8b1af97f518bdc852ac97e4061c2278c7910c"
+            },
+            "tools/concat.exe": {
+              "bytes": 95746048,
+              "sha256": "8bb06d4ca20ba25b49c4c77207b8b1af97f518bdc852ac97e4061c2278c7910c"
+            },
+            "tools/cutflow-agent.exe": {
+              "bytes": 2406912,
+              "sha256": "d2dfe18eb5d214d0007a2c948809d35ae77c5481fd5aa9a639049263ed05cf69"
+            },
+            "tools/bdl.exe": {
+              "bytes": 11147776,
+              "sha256": "0c8b7e39aed07741a98491d35900db96d80290dc27820f5db44b7fb7d238d5d4"
+            }
+          }
+        }
+      },
+      "rpcTransport": {
+        "source": "D:\\LUO\\video editing\\dist\\CutFlow\\tools\\cutflow-agent.exe",
+        "sha256": "d2dfe18eb5d214d0007a2c948809d35ae77c5481fd5aa9a639049263ed05cf69",
+        "sharedTransport": true
+      },
+      "executableSha256": "4a3efce686e9397e0613d3eb11129dd9bb32926e13dae1d3a5a7231727273da0",
+      "initialWebView": {
+        "Browser": "Edg/155.0.4283.45",
+        "Protocol-Version": "1.3",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+        "V8-Version": "15.5.9.4",
+        "WebKit-Version": "537.36 (@50f24ef2aa5369a074b8888b7db82d9c0652d642)",
+        "webSocketDebuggerUrl": "ws://127.0.0.1:56581/devtools/browser/49c5da7d-9836-4480-8117-c5c639e1c778"
+      },
+      "providerRequests": {},
+      "summary": {
+        "warmCount": 50,
+        "warmP50Ms": 207.19999998807907,
+        "warmP95Ms": 212.90000000596046,
+        "coldCount": 4,
+        "coldMaxMs": 487.19999998807907
+      }
+    },
+    {
+      "version": {
+        "protocolVersion": "1.3",
+        "product": "Edg/155.0.4283.45",
+        "revision": "@50f24ef2aa5369a074b8888b7db82d9c0652d642",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+        "jsVersion": "15.5.9.4"
+      },
+      "viewport": {
+        "width": 1426,
+        "height": 892,
+        "dpr": 1.25
+      },
+      "rendered": {
+        "domNodes": 229,
+        "activeTab": "bilibili"
+      },
+      "errors": [],
+      "measurements": [
+        {
+          "phase": "cold",
+          "index": 0,
+          "tab": "creation",
+          "firstFrameMs": 7.5,
+          "settledMs": 64.5,
+          "firstKind": "skeleton"
+        },
+        {
+          "phase": "cold",
+          "index": 1,
+          "tab": "editor",
+          "firstFrameMs": 18.400000005960464,
+          "settledMs": 248.69999998807907,
+          "firstKind": "skeleton"
+        },
+        {
+          "phase": "cold",
+          "index": 2,
+          "tab": "settings",
+          "firstFrameMs": 113.69999998807907,
+          "settledMs": 113.69999998807907,
+          "firstKind": "skeleton"
+        },
+        {
+          "phase": "cold",
+          "index": 3,
+          "tab": "about",
+          "firstFrameMs": 100.69999998807907,
+          "settledMs": 100.69999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "creation",
+          "firstFrameMs": 27.099999994039536,
+          "settledMs": 27.19999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "editor",
+          "firstFrameMs": 13.5,
+          "settledMs": 13.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "settings",
+          "firstFrameMs": 9.200000017881393,
+          "settledMs": 9.200000017881393,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "about",
+          "firstFrameMs": 6.100000023841858,
+          "settledMs": 6.100000023841858,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "bilibili",
+          "firstFrameMs": 7.0999999940395355,
+          "settledMs": 7.0999999940395355,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "creation",
+          "firstFrameMs": 20.5,
+          "settledMs": 20.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "editor",
+          "firstFrameMs": 11.100000023841858,
+          "settledMs": 11.100000023841858,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "settings",
+          "firstFrameMs": 7.199999988079071,
+          "settledMs": 7.199999988079071,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "about",
+          "firstFrameMs": 6.5,
+          "settledMs": 6.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "bilibili",
+          "firstFrameMs": 7.199999988079071,
+          "settledMs": 7.199999988079071,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "creation",
+          "firstFrameMs": 20.80000001192093,
+          "settledMs": 20.80000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "editor",
+          "firstFrameMs": 10.300000011920929,
+          "settledMs": 10.300000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "settings",
+          "firstFrameMs": 7.4000000059604645,
+          "settledMs": 7.4000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "about",
+          "firstFrameMs": 6.899999976158142,
+          "settledMs": 6.899999976158142,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "bilibili",
+          "firstFrameMs": 6.800000011920929,
+          "settledMs": 6.800000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "creation",
+          "firstFrameMs": 20.900000005960464,
+          "settledMs": 20.900000005960464,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "editor",
+          "firstFrameMs": 10.699999988079071,
+          "settledMs": 10.699999988079071,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "settings",
+          "firstFrameMs": 6.899999976158142,
+          "settledMs": 6.899999976158142,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "about",
+          "firstFrameMs": 7.199999988079071,
+          "settledMs": 7.199999988079071,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "bilibili",
+          "firstFrameMs": 7.200000017881393,
+          "settledMs": 7.200000017881393,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "creation",
+          "firstFrameMs": 20.400000005960464,
+          "settledMs": 20.400000005960464,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "editor",
+          "firstFrameMs": 10.400000005960464,
+          "settledMs": 10.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "settings",
+          "firstFrameMs": 7.300000011920929,
+          "settledMs": 7.300000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "about",
+          "firstFrameMs": 7.4000000059604645,
+          "settledMs": 7.4000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "bilibili",
+          "firstFrameMs": 6.800000011920929,
+          "settledMs": 6.800000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "creation",
+          "firstFrameMs": 20.899999976158142,
+          "settledMs": 20.899999976158142,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "editor",
+          "firstFrameMs": 10.300000011920929,
+          "settledMs": 10.300000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "settings",
+          "firstFrameMs": 7,
+          "settledMs": 7,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "about",
+          "firstFrameMs": 7.5999999940395355,
+          "settledMs": 7.5999999940395355,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "bilibili",
+          "firstFrameMs": 6.700000017881393,
+          "settledMs": 6.700000017881393,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "creation",
+          "firstFrameMs": 20.400000005960464,
+          "settledMs": 20.400000005960464,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "editor",
+          "firstFrameMs": 10,
+          "settledMs": 10,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "settings",
+          "firstFrameMs": 6.9000000059604645,
+          "settledMs": 6.9000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "about",
+          "firstFrameMs": 7,
+          "settledMs": 7,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "bilibili",
+          "firstFrameMs": 7.199999988079071,
+          "settledMs": 7.300000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "creation",
+          "firstFrameMs": 17.5,
+          "settledMs": 17.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "editor",
+          "firstFrameMs": 10,
+          "settledMs": 10,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "settings",
+          "firstFrameMs": 6.799999982118607,
+          "settledMs": 6.799999982118607,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "about",
+          "firstFrameMs": 6.9000000059604645,
+          "settledMs": 6.9000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "bilibili",
+          "firstFrameMs": 6.9000000059604645,
+          "settledMs": 6.9000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "creation",
+          "firstFrameMs": 17.80000001192093,
+          "settledMs": 17.80000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "editor",
+          "firstFrameMs": 9.699999988079071,
+          "settledMs": 9.699999988079071,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "settings",
+          "firstFrameMs": 7.5,
+          "settledMs": 7.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "about",
+          "firstFrameMs": 7.4000000059604645,
+          "settledMs": 7.4000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "bilibili",
+          "firstFrameMs": 7.4000000059604645,
+          "settledMs": 7.4000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "creation",
+          "firstFrameMs": 20.700000017881393,
+          "settledMs": 20.700000017881393,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "editor",
+          "firstFrameMs": 10.400000005960464,
+          "settledMs": 10.400000005960464,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "settings",
+          "firstFrameMs": 7.300000011920929,
+          "settledMs": 7.300000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "about",
+          "firstFrameMs": 6.399999976158142,
+          "settledMs": 6.399999976158142,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "bilibili",
+          "firstFrameMs": 7.4000000059604645,
+          "settledMs": 7.4000000059604645,
+          "firstKind": "content"
+        }
+      ],
+      "label": "candidate",
+      "scenario": "idle",
+      "fixture": {
+        "jobs": 1000,
+        "sessions": 500,
+        "storeVersion": 2
+      },
+      "sourceProvenance": {
+        "source": "D:\\LUO\\video editing\\CutFlow\\.build\\creation-cloud-hub\\CutFlow.exe",
+        "version": "0.6.0.0",
+        "sha256": "4f87311e24f1095bd629e0dee02ea772e8983f35853eb2ee63b83031f707398d"
+      },
+      "rpcTransport": {
+        "source": "D:\\LUO\\video editing\\dist\\CutFlow\\tools\\cutflow-agent.exe",
+        "sha256": "d2dfe18eb5d214d0007a2c948809d35ae77c5481fd5aa9a639049263ed05cf69",
+        "sharedTransport": true
+      },
+      "executableSha256": "4f87311e24f1095bd629e0dee02ea772e8983f35853eb2ee63b83031f707398d",
+      "initialWebView": {
+        "Browser": "Edg/155.0.4283.45",
+        "Protocol-Version": "1.3",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+        "V8-Version": "15.5.9.4",
+        "WebKit-Version": "537.36 (@50f24ef2aa5369a074b8888b7db82d9c0652d642)",
+        "webSocketDebuggerUrl": "ws://127.0.0.1:50514/devtools/browser/836a3049-ad70-4981-aa54-a52dc33823d0"
+      },
+      "providerRequests": {
+        "gflow-project-control": 2
+      },
+      "summary": {
+        "warmCount": 50,
+        "warmP50Ms": 7.4000000059604645,
+        "warmP95Ms": 20.899999976158142,
+        "coldCount": 4,
+        "coldMaxMs": 113.69999998807907
+      }
+    },
+    {
+      "version": {
+        "protocolVersion": "1.3",
+        "product": "Edg/155.0.4283.45",
+        "revision": "@50f24ef2aa5369a074b8888b7db82d9c0652d642",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+        "jsVersion": "15.5.9.4"
+      },
+      "viewport": {
+        "width": 1426,
+        "height": 892,
+        "dpr": 1.25
+      },
+      "rendered": {
+        "domNodes": 240,
+        "activeTab": "bilibili"
+      },
+      "errors": [],
+      "measurements": [
+        {
+          "phase": "cold",
+          "index": 0,
+          "tab": "creation",
+          "firstFrameMs": 321.5,
+          "settledMs": 395.90000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "cold",
+          "index": 1,
+          "tab": "editor",
+          "firstFrameMs": 227.59999999403954,
+          "settledMs": 333,
+          "firstKind": "content"
+        },
+        {
+          "phase": "cold",
+          "index": 2,
+          "tab": "settings",
+          "firstFrameMs": 323.40000000596046,
+          "settledMs": 429.19999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "cold",
+          "index": 3,
+          "tab": "about",
+          "firstFrameMs": 217.7000000178814,
+          "settledMs": 323.2000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "creation",
+          "firstFrameMs": 212.5,
+          "settledMs": 317.59999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "editor",
+          "firstFrameMs": 206.2999999821186,
+          "settledMs": 311.90000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "settings",
+          "firstFrameMs": 212.5,
+          "settledMs": 317.89999997615814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "about",
+          "firstFrameMs": 206.5,
+          "settledMs": 312,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "bilibili",
+          "firstFrameMs": 211.59999999403954,
+          "settledMs": 317.19999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "creation",
+          "firstFrameMs": 211.40000000596046,
+          "settledMs": 316.90000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "editor",
+          "firstFrameMs": 205.7000000178814,
+          "settledMs": 311.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "settings",
+          "firstFrameMs": 212.7000000178814,
+          "settledMs": 318.2000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "about",
+          "firstFrameMs": 205.09999999403954,
+          "settledMs": 310.59999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "bilibili",
+          "firstFrameMs": 205.40000000596046,
+          "settledMs": 311,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "creation",
+          "firstFrameMs": 206.80000001192093,
+          "settledMs": 312.19999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "editor",
+          "firstFrameMs": 205.90000000596046,
+          "settledMs": 311.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "settings",
+          "firstFrameMs": 212,
+          "settledMs": 317.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "about",
+          "firstFrameMs": 206.90000000596046,
+          "settledMs": 312.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "bilibili",
+          "firstFrameMs": 207.19999998807907,
+          "settledMs": 312.69999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "creation",
+          "firstFrameMs": 211.09999999403954,
+          "settledMs": 312.80000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "editor",
+          "firstFrameMs": 206.7999999821186,
+          "settledMs": 312.39999997615814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "settings",
+          "firstFrameMs": 213,
+          "settledMs": 318.80000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "about",
+          "firstFrameMs": 212.90000000596046,
+          "settledMs": 318.2999999821186,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "bilibili",
+          "firstFrameMs": 214.59999999403954,
+          "settledMs": 319.89999997615814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "creation",
+          "firstFrameMs": 214,
+          "settledMs": 319.30000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "editor",
+          "firstFrameMs": 206.5,
+          "settledMs": 312.09999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "settings",
+          "firstFrameMs": 212.40000000596046,
+          "settledMs": 317.90000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "about",
+          "firstFrameMs": 207.10000002384186,
+          "settledMs": 312.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "bilibili",
+          "firstFrameMs": 207.39999997615814,
+          "settledMs": 313,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "creation",
+          "firstFrameMs": 207.7000000178814,
+          "settledMs": 313.30000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "editor",
+          "firstFrameMs": 206.60000002384186,
+          "settledMs": 312.2000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "settings",
+          "firstFrameMs": 212.7000000178814,
+          "settledMs": 318.2000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "about",
+          "firstFrameMs": 206.90000000596046,
+          "settledMs": 312.19999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "bilibili",
+          "firstFrameMs": 206.7000000178814,
+          "settledMs": 312.2000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "creation",
+          "firstFrameMs": 207.19999998807907,
+          "settledMs": 312.59999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "editor",
+          "firstFrameMs": 206.69999998807907,
+          "settledMs": 312.19999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "settings",
+          "firstFrameMs": 211.90000000596046,
+          "settledMs": 317.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "about",
+          "firstFrameMs": 206.90000000596046,
+          "settledMs": 312.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "bilibili",
+          "firstFrameMs": 207.2000000178814,
+          "settledMs": 312.7000000178814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "creation",
+          "firstFrameMs": 206.90000000596046,
+          "settledMs": 312.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "editor",
+          "firstFrameMs": 206.7000000178814,
+          "settledMs": 312.40000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "settings",
+          "firstFrameMs": 212.30000001192093,
+          "settledMs": 317.90000000596046,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "about",
+          "firstFrameMs": 207.2999999821186,
+          "settledMs": 312.7999999821186,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "bilibili",
+          "firstFrameMs": 207.09999999403954,
+          "settledMs": 312.59999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "creation",
+          "firstFrameMs": 213.2000000178814,
+          "settledMs": 318.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "editor",
+          "firstFrameMs": 206.90000000596046,
+          "settledMs": 312.59999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "settings",
+          "firstFrameMs": 212.5,
+          "settledMs": 318,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "about",
+          "firstFrameMs": 206.7999999821186,
+          "settledMs": 312.39999997615814,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "bilibili",
+          "firstFrameMs": 207,
+          "settledMs": 312.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "creation",
+          "firstFrameMs": 207.7000000178814,
+          "settledMs": 313,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "editor",
+          "firstFrameMs": 207.10000002384186,
+          "settledMs": 312.60000002384186,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "settings",
+          "firstFrameMs": 212.40000000596046,
+          "settledMs": 318.10000002384186,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "about",
+          "firstFrameMs": 207,
+          "settledMs": 312.59999999403954,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "bilibili",
+          "firstFrameMs": 207.2000000178814,
+          "settledMs": 312.7000000178814,
+          "firstKind": "content"
+        }
+      ],
+      "label": "baseline",
+      "scenario": "active-download",
+      "fixture": {
+        "jobs": 1000,
+        "sessions": 0,
+        "storeVersion": 1
+      },
+      "sourceProvenance": {
+        "source": "D:\\LUO\\video editing\\dist\\CutFlow\\CutFlow.exe",
+        "version": "0.5.0.0",
+        "sha256": "4a3efce686e9397e0613d3eb11129dd9bb32926e13dae1d3a5a7231727273da0",
+        "buildInfo": {
+          "version": "0.5.0",
+          "commit": "6202e3e68d998714842b8ac79ebb2d1c367f3101",
+          "cloud_run": "39030223570",
+          "files": {
+            "CutFlow.exe": {
+              "bytes": 36175360,
+              "sha256": "4a3efce686e9397e0613d3eb11129dd9bb32926e13dae1d3a5a7231727273da0"
+            },
+            "CutFlow-editor.exe": {
+              "bytes": 95746048,
+              "sha256": "8bb06d4ca20ba25b49c4c77207b8b1af97f518bdc852ac97e4061c2278c7910c"
+            },
+            "tools/concat.exe": {
+              "bytes": 95746048,
+              "sha256": "8bb06d4ca20ba25b49c4c77207b8b1af97f518bdc852ac97e4061c2278c7910c"
+            },
+            "tools/cutflow-agent.exe": {
+              "bytes": 2406912,
+              "sha256": "d2dfe18eb5d214d0007a2c948809d35ae77c5481fd5aa9a639049263ed05cf69"
+            },
+            "tools/bdl.exe": {
+              "bytes": 11147776,
+              "sha256": "0c8b7e39aed07741a98491d35900db96d80290dc27820f5db44b7fb7d238d5d4"
+            }
+          }
+        }
+      },
+      "rpcTransport": {
+        "source": "D:\\LUO\\video editing\\dist\\CutFlow\\tools\\cutflow-agent.exe",
+        "sha256": "d2dfe18eb5d214d0007a2c948809d35ae77c5481fd5aa9a639049263ed05cf69",
+        "sharedTransport": true
+      },
+      "executableSha256": "4a3efce686e9397e0613d3eb11129dd9bb32926e13dae1d3a5a7231727273da0",
+      "initialWebView": {
+        "Browser": "Edg/155.0.4283.45",
+        "Protocol-Version": "1.3",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+        "V8-Version": "15.5.9.4",
+        "WebKit-Version": "537.36 (@50f24ef2aa5369a074b8888b7db82d9c0652d642)",
+        "webSocketDebuggerUrl": "ws://127.0.0.1:53127/devtools/browser/490f3f61-5768-4e6b-919b-47695508ea27"
+      },
+      "providerRequests": {
+        "custom-image": 1,
+        "media-download": 1
+      },
+      "summary": {
+        "warmCount": 50,
+        "warmP50Ms": 207.19999998807907,
+        "warmP95Ms": 213.2000000178814,
+        "coldCount": 4,
+        "coldMaxMs": 323.40000000596046
+      }
+    },
+    {
+      "version": {
+        "protocolVersion": "1.3",
+        "product": "Edg/155.0.4283.45",
+        "revision": "@50f24ef2aa5369a074b8888b7db82d9c0652d642",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+        "jsVersion": "15.5.9.4"
+      },
+      "viewport": {
+        "width": 1426,
+        "height": 892,
+        "dpr": 1.25
+      },
+      "rendered": {
+        "domNodes": 229,
+        "activeTab": "bilibili"
+      },
+      "errors": [],
+      "measurements": [
+        {
+          "phase": "cold",
+          "index": 0,
+          "tab": "creation",
+          "firstFrameMs": 7.299999982118607,
+          "settledMs": 77.19999998807907,
+          "firstKind": "skeleton"
+        },
+        {
+          "phase": "cold",
+          "index": 1,
+          "tab": "editor",
+          "firstFrameMs": 16.399999976158142,
+          "settledMs": 264.09999999403954,
+          "firstKind": "skeleton"
+        },
+        {
+          "phase": "cold",
+          "index": 2,
+          "tab": "settings",
+          "firstFrameMs": 119.2999999821186,
+          "settledMs": 119.2999999821186,
+          "firstKind": "skeleton"
+        },
+        {
+          "phase": "cold",
+          "index": 3,
+          "tab": "about",
+          "firstFrameMs": 15.5,
+          "settledMs": 15.5,
+          "firstKind": "skeleton"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "creation",
+          "firstFrameMs": 28.299999982118607,
+          "settledMs": 28.299999982118607,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "editor",
+          "firstFrameMs": 11.900000005960464,
+          "settledMs": 11.900000005960464,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "settings",
+          "firstFrameMs": 8.5,
+          "settledMs": 8.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "about",
+          "firstFrameMs": 7,
+          "settledMs": 7,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 0,
+          "tab": "bilibili",
+          "firstFrameMs": 7.0999999940395355,
+          "settledMs": 7.0999999940395355,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "creation",
+          "firstFrameMs": 20.900000005960464,
+          "settledMs": 20.900000005960464,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "editor",
+          "firstFrameMs": 11.599999994039536,
+          "settledMs": 11.599999994039536,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "settings",
+          "firstFrameMs": 7.0999999940395355,
+          "settledMs": 7.0999999940395355,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "about",
+          "firstFrameMs": 6.4000000059604645,
+          "settledMs": 6.4000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 1,
+          "tab": "bilibili",
+          "firstFrameMs": 6.9000000059604645,
+          "settledMs": 6.9000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "creation",
+          "firstFrameMs": 22,
+          "settledMs": 22,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "editor",
+          "firstFrameMs": 10.300000011920929,
+          "settledMs": 10.400000005960464,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "settings",
+          "firstFrameMs": 6.800000011920929,
+          "settledMs": 6.800000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "about",
+          "firstFrameMs": 6.800000011920929,
+          "settledMs": 6.800000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 2,
+          "tab": "bilibili",
+          "firstFrameMs": 7,
+          "settledMs": 7,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "creation",
+          "firstFrameMs": 21,
+          "settledMs": 21,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "editor",
+          "firstFrameMs": 9.799999982118607,
+          "settledMs": 9.799999982118607,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "settings",
+          "firstFrameMs": 7.800000011920929,
+          "settledMs": 7.800000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "about",
+          "firstFrameMs": 7.200000017881393,
+          "settledMs": 7.200000017881393,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 3,
+          "tab": "bilibili",
+          "firstFrameMs": 7.0999999940395355,
+          "settledMs": 7.0999999940395355,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "creation",
+          "firstFrameMs": 18.80000001192093,
+          "settledMs": 18.80000001192093,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "editor",
+          "firstFrameMs": 10.400000005960464,
+          "settledMs": 10.400000005960464,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "settings",
+          "firstFrameMs": 7.9000000059604645,
+          "settledMs": 7.9000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "about",
+          "firstFrameMs": 6.9000000059604645,
+          "settledMs": 6.9000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 4,
+          "tab": "bilibili",
+          "firstFrameMs": 7.200000017881393,
+          "settledMs": 7.200000017881393,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "creation",
+          "firstFrameMs": 22.5,
+          "settledMs": 22.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "editor",
+          "firstFrameMs": 10.599999994039536,
+          "settledMs": 10.599999994039536,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "settings",
+          "firstFrameMs": 7.9000000059604645,
+          "settledMs": 7.9000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "about",
+          "firstFrameMs": 7.0999999940395355,
+          "settledMs": 7.0999999940395355,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 5,
+          "tab": "bilibili",
+          "firstFrameMs": 7.4000000059604645,
+          "settledMs": 7.4000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "creation",
+          "firstFrameMs": 20.69999998807907,
+          "settledMs": 20.69999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "editor",
+          "firstFrameMs": 9.100000023841858,
+          "settledMs": 9.100000023841858,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "settings",
+          "firstFrameMs": 7,
+          "settledMs": 7,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "about",
+          "firstFrameMs": 7.0999999940395355,
+          "settledMs": 7.0999999940395355,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 6,
+          "tab": "bilibili",
+          "firstFrameMs": 7.0999999940395355,
+          "settledMs": 7.0999999940395355,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "creation",
+          "firstFrameMs": 17.099999994039536,
+          "settledMs": 17.099999994039536,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "editor",
+          "firstFrameMs": 9.300000011920929,
+          "settledMs": 9.300000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "settings",
+          "firstFrameMs": 7.5,
+          "settledMs": 7.5,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "about",
+          "firstFrameMs": 7.4000000059604645,
+          "settledMs": 7.4000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 7,
+          "tab": "bilibili",
+          "firstFrameMs": 7.4000000059604645,
+          "settledMs": 7.4000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "creation",
+          "firstFrameMs": 17.69999998807907,
+          "settledMs": 17.69999998807907,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "editor",
+          "firstFrameMs": 10.299999982118607,
+          "settledMs": 10.299999982118607,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "settings",
+          "firstFrameMs": 6.699999988079071,
+          "settledMs": 6.699999988079071,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "about",
+          "firstFrameMs": 7.299999982118607,
+          "settledMs": 7.4000000059604645,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 8,
+          "tab": "bilibili",
+          "firstFrameMs": 7.299999982118607,
+          "settledMs": 7.299999982118607,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "creation",
+          "firstFrameMs": 18.599999994039536,
+          "settledMs": 18.599999994039536,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "editor",
+          "firstFrameMs": 10,
+          "settledMs": 10,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "settings",
+          "firstFrameMs": 7.800000011920929,
+          "settledMs": 7.800000011920929,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "about",
+          "firstFrameMs": 6.299999982118607,
+          "settledMs": 6.299999982118607,
+          "firstKind": "content"
+        },
+        {
+          "phase": "warm",
+          "index": 9,
+          "tab": "bilibili",
+          "firstFrameMs": 7.100000023841858,
+          "settledMs": 7.100000023841858,
+          "firstKind": "content"
+        }
+      ],
+      "label": "candidate",
+      "scenario": "active-download",
+      "fixture": {
+        "jobs": 1000,
+        "sessions": 500,
+        "storeVersion": 2
+      },
+      "sourceProvenance": {
+        "source": "D:\\LUO\\video editing\\CutFlow\\.build\\creation-cloud-hub\\CutFlow.exe",
+        "version": "0.6.0.0",
+        "sha256": "4f87311e24f1095bd629e0dee02ea772e8983f35853eb2ee63b83031f707398d"
+      },
+      "rpcTransport": {
+        "source": "D:\\LUO\\video editing\\dist\\CutFlow\\tools\\cutflow-agent.exe",
+        "sha256": "d2dfe18eb5d214d0007a2c948809d35ae77c5481fd5aa9a639049263ed05cf69",
+        "sharedTransport": true
+      },
+      "executableSha256": "4f87311e24f1095bd629e0dee02ea772e8983f35853eb2ee63b83031f707398d",
+      "initialWebView": {
+        "Browser": "Edg/155.0.4283.45",
+        "Protocol-Version": "1.3",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0",
+        "V8-Version": "15.5.9.4",
+        "WebKit-Version": "537.36 (@50f24ef2aa5369a074b8888b7db82d9c0652d642)",
+        "webSocketDebuggerUrl": "ws://127.0.0.1:52674/devtools/browser/7e993efd-862d-441c-8c92-bcef24424a17"
+      },
+      "providerRequests": {
+        "gflow-project-control": 2,
+        "custom-image": 1,
+        "media-download": 1
+      },
+      "summary": {
+        "warmCount": 50,
+        "warmP50Ms": 7.5,
+        "warmP95Ms": 22,
+        "coldCount": 4,
+        "coldMaxMs": 119.2999999821186
+      }
+    }
+  ],
+  "boundary": "Synthetic 500 sessions/1000 history; local result download; no paid Google/Bilibili request",
+  "thresholds": {
+    "warmFirstFrameP95Ms": 100,
+    "coldFirstFrameMaxMs": 250
+  }
+}

@@ -1,0 +1,158 @@
+{
+  "method": "Windows Recycle Bin",
+  "CutFlowEntries": [
+    {
+      "path": ".build\\navigation-compare-20261018",
+      "bytes": 45524511,
+      "sizeMiB": 43.416,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\navigation-compare-20261018-r2",
+      "bytes": 205595947,
+      "sizeMiB": 196.072,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-playwright",
+      "bytes": 2403238,
+      "sizeMiB": 2.292,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-playwright-cache-repair",
+      "bytes": 45,
+      "sizeMiB": 0.0,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-playwright-cold",
+      "bytes": 45,
+      "sizeMiB": 0.0,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-playwright-complete",
+      "bytes": 2354003,
+      "sizeMiB": 2.245,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-playwright-final",
+      "bytes": 21744364,
+      "sizeMiB": 20.737,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-playwright-repair",
+      "bytes": 45,
+      "sizeMiB": 0.0,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-playwright-scroll",
+      "bytes": 2423086,
+      "sizeMiB": 2.311,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-playwright-verified",
+      "bytes": 45,
+      "sizeMiB": 0.0,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-browser",
+      "bytes": 286315769,
+      "sizeMiB": 273.052,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-server.json",
+      "bytes": 14,
+      "sizeMiB": 0.0,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-server.log",
+      "bytes": 4378,
+      "sizeMiB": 0.004,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation_ci_monitor.py",
+      "bytes": 3990,
+      "sizeMiB": 0.004,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\tmp",
+      "bytes": 69666735,
+      "sizeMiB": 66.439,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\cache",
+      "bytes": 0,
+      "sizeMiB": 0.0,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\npm",
+      "bytes": 0,
+      "sizeMiB": 0.0,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-cloud-hub",
+      "bytes": 742038067,
+      "sizeMiB": 707.663,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\target",
+      "bytes": 3380994183,
+      "sizeMiB": 3224.367,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\pnpm-home",
+      "bytes": 1645885943,
+      "sizeMiB": 1569.639,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\navigation-final-verified",
+      "bytes": 205534846,
+      "sizeMiB": 196.013,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-final-exe",
+      "bytes": 36510720,
+      "sizeMiB": 34.819,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\creation-gh",
+      "bytes": 41483064,
+      "sizeMiB": 39.561,
+      "status": "recycled"
+    }
+  ],
+  "CutFlowTotalBytes": 6688483038,
+  "pluginInitialBytes": 210316000,
+  "pluginFinalBytes": 1323676023,
+  "pluginReport": "../cpa-plugin-GFlow/docs/cleanup-final-0.1.12.json",
+  "preserved": [
+    "source and reusable tests",
+    "docs/verification-20261018-creation screenshots and raw measurements",
+    "cpa-plugin-GFlow/dist/windows-amd64 final plugin",
+    "D-drive Node/Rust/native runtimes and installed frontend dependencies"
+  ],
+  "existingUserInstallationChanged": false,
+  "ownedTestProcessesStopped": true,
+  "totalBytes": 8222475061,
+  "totalGiB": 7.658,
+  "totalGB": 8.222
+}

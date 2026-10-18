@@ -1,0 +1,14 @@
+[
+  {
+    "path": ".build\\target",
+    "bytes": 3380994183,
+    "sizeMiB": 3224.367,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\pnpm-home",
+    "bytes": 1645885943,
+    "sizeMiB": 1569.639,
+    "status": "recycled"
+  }
+]
