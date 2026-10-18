@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CreationPage from './CreationPage.vue'
 import EditorPage from './EditorPage.vue'
 import { useCutflowStore } from '../../shared/stores/cutflow'
-import { emptyDraft } from '../../shared/stores/creation'
+import { emptyDraft, useCreationStore } from '../../shared/stores/creation'
 import type { AiModel, CreationProject, CreationSession, Job } from '../../shared/api/cutflow'
 
 const invoke = vi.hoisted(() => vi.fn())
@@ -79,7 +79,7 @@ describe('CutFlow workspaces', () => {
     invoke.mockReset()
   })
 
-  it('requires a bound project and then submits a custom GFlow model within its own session', async () => {
+  it('requires a bound project and then submits a catalog model within its own session', async () => {
     const state = workspaceFixture(); state.projects = []; state.sessions = []
     mockCreation(state)
     const wrapper = creationView(); await flushPromises()
@@ -91,11 +91,15 @@ describe('CutFlow workspaces', () => {
     await wrapper.get('form.project-create-form').trigger('submit'); await flushPromises()
     expect(invoke.mock.calls.some(([, input]) => input.method === 'cutflow.creation.projects.create')).toBe(true)
     expect(invoke.mock.calls.some(([, input]) => input.method === 'cutflow.creation.sessions.create')).toBe(true)
-    await wrapper.get('#ai-model').setValue('gflow-custom-image')
+    expect(wrapper.find('.custom-model').exists()).toBe(false)
+    expect(wrapper.find('.model-picker').attributes('open')).toBeUndefined()
+    await wrapper.get('.model-summary').trigger('click')
+    expect(wrapper.get('.model-options').text()).not.toContain('gflow-')
+    await wrapper.get('.model-options button').trigger('click')
     await wrapper.get('#ai-prompt').setValue('画一个安静的海边')
     await wrapper.get('form.conversation-composer').trigger('submit'); await flushPromises()
     const sent = generationCalls()[0][1].params
-    expect(sent).toMatchObject({ model: 'gflow-custom-image', creationProjectId: 'project-a', sessionId: 'session-a', maxGenerationCalls: 1 })
+    expect(sent).toMatchObject({ model: 'gflow-nano-banana-2-lite', creationProjectId: 'project-a', sessionId: 'session-a', maxGenerationCalls: 1 })
     expect(sent.projectPath).toBeUndefined()
     expect(sent.operationId).toBeTruthy()
     expect(sent.turnId).toBeTruthy()
@@ -132,8 +136,9 @@ describe('CutFlow workspaces', () => {
     mockCreation(state)
     const wrapper = creationView(); await flushPromises()
     expect(wrapper.get('.model-options button[aria-pressed="true"]').text()).toContain('Nano Banana 2 Lite')
-    const choices = wrapper.findAll('.model-options button small').map(item => item.text())
-    expect(choices).toEqual(['gflow-nano-banana-2.1', 'gflow-nano-banana-2-lite'])
+    const choices = wrapper.findAll('.model-options button strong').map(item => item.text())
+    expect(choices).toEqual(['Nano Banana 2.1', 'Nano Banana 2 Lite'])
+    expect(wrapper.get('.model-options').text()).not.toContain('gflow-')
     await wrapper.get('.model-options button').trigger('click')
     await wrapper.get('#ai-prompt').setValue('人物')
     await wrapper.get('form.conversation-composer').trigger('submit'); await flushPromises()
@@ -147,7 +152,7 @@ describe('CutFlow workspaces', () => {
   it('rejects a non-GFlow model before submitting a project generation', async () => {
     const state = workspaceFixture(); mockCreation(state)
     const wrapper = creationView(); await flushPromises()
-    await wrapper.get('#ai-model').setValue('gpt-image-1.5')
+    useCreationStore().draft.model = 'gpt-image-1.5'
     await wrapper.get('#ai-prompt').setValue('人物')
     await wrapper.get('form.conversation-composer').trigger('submit'); await flushPromises()
     expect(generationCalls()).toHaveLength(0)

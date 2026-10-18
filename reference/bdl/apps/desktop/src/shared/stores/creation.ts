@@ -39,8 +39,9 @@ export const modelKind = (model: AiModel) =>
         ? 'image'
         : 'unknown'
     : model.kind;
-export const modelName = (id: unknown) =>
-  ({
+export const modelName = (id: unknown) => {
+  const value = String(id || '').trim();
+  const names: Record<string, string> = {
     'gflow-nano-banana-pro': 'Nano Banana Pro',
     'gflow-nano-banana-2-lite': 'Nano Banana 2 Lite',
     'gflow-nano-banana-2.1': 'Nano Banana 2.1',
@@ -48,7 +49,13 @@ export const modelName = (id: unknown) =>
     'gflow-veo-3.1-fast': 'Veo 3.1 Fast',
     'gflow-veo-3.1-quality': 'Veo 3.1 Quality',
     'gflow-omni-1.1-flash': 'Omni 1.1 Flash',
-  })[String(id)] || String(id || '选择模型');
+  };
+  if (names[value]) return names[value];
+  if (value.startsWith('gflow-nano-banana-')) return 'Nano Banana';
+  if (value.startsWith('gflow-veo-')) return 'Veo';
+  if (value.startsWith('gflow-omni-')) return 'Flow Omni';
+  return value ? 'Google Flow 模型' : '选择模型';
+};
 const normalizeSession = (item: CreationSession): CreationSession => ({
   ...item,
   drafts: { image: { ...emptyDraft(), ...item.drafts?.image }, video: { ...emptyDraft(), ...item.drafts?.video } },

@@ -32,7 +32,8 @@ const originalAsset = ref<Asset | null>(null),
   details = ref<Job | null>(null);
 const modelSearch = ref(''),
   sessionSearch = ref(''),
-  referencesOpen = ref(false);
+  referencesOpen = ref(false),
+  modelExpanded = ref(false);
 const referenceName = ref(''),
   referenceKind = ref('character'),
   notice = ref('');
@@ -115,9 +116,14 @@ const invalidModel = computed(
   () =>
     !draft.value.model.startsWith('gflow-') ||
     draft.value.model === 'gflow-project-control' ||
-    (draft.value.modelSource !== 'custom' && !capability.value) ||
+    !capability.value ||
     (!!capability.value && modelKind(capability.value) !== creation.kind),
 );
+const modelDescription = (model: { id: string; description?: string; kind?: string }) => {
+  const description = String(model.description || '').trim();
+  if (description && !description.toLowerCase().includes('gflow-')) return description;
+  return model.kind === 'video' ? 'Google Veo 视频生成' : 'Google 图片生成';
+};
 const aspectOptions = computed(() =>
   capability.value?.aspects?.length
     ? capability.value.aspects
@@ -968,8 +974,11 @@ onUnmounted(() => {
             </button>
           </div>
         </section>
-        <section class="model-section">
-          <label for="ai-model-search">模型</label>
+        <details class="model-section model-picker" :open="modelExpanded" @toggle="modelExpanded = ($event.target as HTMLDetailsElement).open">
+          <summary class="model-summary">
+            <span><label for="ai-model-search">模型</label><strong>{{ modelName(draft.model) }}</strong></span>
+            <UIcon :name="modelExpanded ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'" aria-hidden="true" />
+          </summary>
           <div class="parameter-search">
             <UIcon name="i-tabler-search" aria-hidden="true" /><input
               id="ai-model-search"
@@ -990,19 +999,13 @@ onUnmounted(() => {
             >
               <span
                 ><strong>{{ modelName(model.id) }}</strong
-                ><small>{{ model.description || model.id }}</small></span
+                ><small>{{ modelDescription(model) }}</small></span
               ><UIcon v-if="draft.model === model.id" name="i-tabler-check" aria-hidden="true" />
             </button>
           </div>
           <p v-if="!models.length" class="studio-muted">还没有可用模型，请检查连接。</p>
           <button class="studio-link" @click="creation.loadCatalog(true)">刷新模型与能力</button>
-          <details class="custom-model">
-            <summary>自定义 GFlow 模型</summary>
-            <label for="ai-model">模型 ID</label
-            ><input id="ai-model" v-model="draft.model" placeholder="gflow-…" @input="draft.modelSource = 'custom'" />
-            <p class="studio-muted">自定义 · 能力未确认</p>
-          </details>
-        </section>
+        </details>
         <section>
           <label for="ai-aspect">画面尺寸 / 比例</label
           ><select id="ai-aspect" v-model="draft.aspect">

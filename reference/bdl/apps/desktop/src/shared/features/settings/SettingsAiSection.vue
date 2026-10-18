@@ -86,7 +86,7 @@ onMounted(load);
       >测试实际回复（少量用量）</UiButton
     >
     <p v-if="message" role="status">{{ message }}</p>
-    <p>服务需提供图片或视频生成模型。普通聊天模型未必能生成媒体。模型 ID 可在创作页手动填写。</p>
+        <p>服务需提供图片或视频生成模型。普通聊天模型未必能生成媒体；创作页仅显示已验证的 Google Flow 媒体模型。</p>
     <details>
       <summary>进阶 · 外部 AI 控制</summary>
       <p>

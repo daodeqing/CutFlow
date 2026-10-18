@@ -4,6 +4,7 @@ import { mobileRailLayoutKey } from './layout';
 import { useUiStore } from '../../shared/stores/ui';
 import { useNavigationStatus } from '../../shared/features/navigation';
 import { isAndroidPlatform } from '../../shared/platform/environment';
+import brandMark from '../../assets/cutflow-mark.svg';
 
 // Keep legacy query syntax in JS: CSS minification rewrites it to range syntax.
 const railQuery = window.matchMedia(
@@ -56,7 +57,7 @@ const { transferBadgeCount } = useNavigationStatus();
     :class="{ 'mobile-layout-rail': railLayout, 'mobile-layout-compact': compactLayout }"
   >
     <header class="mobile-header" aria-label="BDL">
-      <span class="mobile-mark" aria-hidden="true"><i></i><i></i></span>
+      <span class="mobile-mark" aria-hidden="true"><img :src="brandMark" alt="" /></span>
       <strong class="mobile-brand-name">BDL</strong>
     </header>
     <slot />
@@ -112,24 +113,16 @@ const { transferBadgeCount } = useNavigationStatus();
 .mobile-mark {
   width: 2rem;
   height: 2rem;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 0.1875rem;
-  padding: 0.4375rem;
+  display: block;
+  flex: 0 0 auto;
   border-radius: 0.625rem;
-  background: var(--color-accent);
+  overflow: hidden;
 }
 
-.mobile-mark i {
-  width: 0.3125rem;
-  height: 0.625rem;
-  border-radius: 0.0625rem;
-  background: var(--color-on-accent);
-}
-
-.mobile-mark i:last-child {
-  height: 1rem;
+.mobile-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .mobile-brand-name {
@@ -221,7 +214,6 @@ const { transferBadgeCount } = useNavigationStatus();
 .mobile-layout-rail .mobile-mark {
   width: 1.75rem;
   height: 1.75rem;
-  padding: 0.3125rem;
   border-radius: 0.5rem;
 }
 
@@ -266,17 +258,7 @@ const { transferBadgeCount } = useNavigationStatus();
 .mobile-layout-compact .mobile-mark {
   width: 1.375rem;
   height: 1.375rem;
-  padding: 0.25rem;
   border-radius: 0.375rem;
-}
-
-.mobile-layout-compact .mobile-mark i {
-  width: 0.25rem;
-  height: 0.5rem;
-}
-
-.mobile-layout-compact .mobile-mark i:last-child {
-  height: 0.8125rem;
 }
 
 .mobile-layout-compact .mobile-brand-name {

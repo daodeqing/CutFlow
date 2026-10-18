@@ -26,8 +26,8 @@ SetupIconFile={#Stage}\CutFlow.ico
 [Files]
 Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 [Icons]
-Name: "{group}\CutFlow"; Filename: "{app}\CutFlow.exe"
-Name: "{autodesktop}\CutFlow"; Filename: "{app}\CutFlow.exe"; Tasks: desktopicon
+Name: "{group}\CutFlow"; Filename: "{app}\CutFlow.exe"; IconFilename: "{app}\CutFlow.ico"
+Name: "{autodesktop}\CutFlow"; Filename: "{app}\CutFlow.exe"; IconFilename: "{app}\CutFlow.ico"; Tasks: desktopicon
 [Tasks]
 Name: desktopicon; Description: "Create a desktop shortcut"; Flags: unchecked
 [Run]
