@@ -122,6 +122,7 @@ def build(installer, skip_smoke, component):
             raise RuntimeError('Missing build component: ' + name)
         shutil.copytree(source, stage, dirs_exist_ok=True)
     for source, destination in [('README.md', '使用说明.md'), ('docs/创作与外部AI.md', '创作与外部AI.md'),
+                                ('docs/creation-projects.md', '项目与聊天.md'),
                                 ('docs/验收与已知限制.md', '验收与已知限制.md'), ('docs/SOURCE_OFFER.md', 'SOURCE_OFFER.md'),
                                 ('scripts/启动CutFlow.vbs', '启动CutFlow.vbs'), ('examples/draft.json', 'examples/draft.json')]:
         copy(root / source, stage / destination)

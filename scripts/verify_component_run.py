@@ -39,6 +39,7 @@ def verify():
     packaging_files = {
         '.github/workflows/windows.yml', 'scripts/build_windows.py',
         'scripts/CutFlow.iss', 'scripts/verify_component_run.py',
+        'docs/创作与外部AI.md', 'docs/验收与已知限制.md', 'docs/creation-projects.md',
     }
     unsafe = sorted(set(changed) - packaging_files)
     if unsafe:

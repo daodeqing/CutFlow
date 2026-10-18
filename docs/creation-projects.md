@@ -31,8 +31,18 @@ gflow-project-control 使用普通生成 API Key 调用 /v1/chat/completions，s
 
 现有 windows-webview-smoke.mjs 只检查启动渲染，9222 依赖 smoke 配置；check_hub.py 验证原生 RPC 与模拟媒体，没有导航计时。新验收工具 tests/check_creation_navigation.py 使用用户指定同一 WebView2 runtime，通过本机 CDP 附加旧/新真实应用；不重新编译。
 
-旧程序只读来源为 D:/LUO/video editing/dist/CutFlow/CutFlow.exe，新程序来自 GitHub hub 构建产物。两者分别复制到项目 .build 的隔离目录，各配自己的 agent；不接触原 portable。旧版预置 v1 的 1,000 个任务，新版预置 v2 的同量任务及 500 个聊天。它比较相同历史负载，不声称旧版具备聊天功能。
+旧程序只读来源为 D:/LUO/video editing/dist/CutFlow/CutFlow.exe，新程序来自 GitHub hub 构建产物。两者分别复制到项目 .build 的隔离目录；原生接口通过各自 agent，或明确记录来源和哈希的同一通用 RPC transport 调用，不接触原 portable。旧版预置 v1 的 1,000 个任务，新版预置 v2 的同量任务及 500 个聊天。它比较相同历史负载，不声称旧版具备聊天功能。
 
 顺序测试冷切换、预热连续切换及可选本机媒体下载压力。计时从真实 click 到目标内容/占位首次可见的绘制机会，不能把导航激活状态当作页面绘制完成。输出原始延时、P50/P95、版本、视口、EXE/运行时哈希和本机 provider 请求计数；活动压力是 AI 结果下载，不标记为真实 B站下载。
 
-运行前必须确认旧/新各自的 tools/cutflow-agent.exe 齐全，输出目录在 D 盘项目内且不存在；所有运行时/缓存/日志重定向到隔离目录。只关闭工具自己创建的进程。隔离 stage、日志和用户数据在复核后统一移至回收站并记录大小；正式可复用脚本保留。工具编写、静态检查与真实执行须在总记录分别标注；真实执行等待新云端产物。
+运行前必须确认旧/新各自的 tools/cutflow-agent.exe 齐全，或以 --agent-exe 指定已核验的通用 RPC transport，输出目录在 D 盘项目内且不存在；所有运行时/缓存/日志重定向到隔离目录。只关闭工具自己创建的进程。隔离 stage、日志和用户数据在复核后统一移至回收站并记录大小；正式可复用脚本保留。工具编写、静态检查与真实执行须在总记录分别标注；真实执行等待新云端产物。
+
+工具静态检查及真实应用测量均已完成，216次原始导航记录和边界见 verification-20261018-creation/webview2-navigation-report.md。新版闲置/本机媒体下载活动的预热首帧P95分别20.9/22.0ms，冷切换最大113.7/119.3ms。完整复现示例（先确认路径，需使用新的不存在输出目录）：
+
+    python tests/check_creation_navigation.py --baseline-exe "D:/LUO/video editing/dist/CutFlow/CutFlow.exe" --candidate-exe "D:/LUO/video editing/CutFlow/.build/creation-cloud-hub/CutFlow.exe" --runtime-dir "D:/LUO/video editing/dist/CutFlow/WebView2" --node "D:/LUO/video editing/CutFlow/.build/node/node.exe" --output "D:/LUO/video editing/CutFlow/.build/navigation-compare" --active-download
+
+运行时目录必须直接包含 msedgewebview2.exe。云端 hub 不包含 agent 时，可附 --agent-exe "D:/LUO/video editing/dist/CutFlow/tools/cutflow-agent.exe"：已核对基线6202e3e源码，agent 的 call 分支直接转发 METHOD 和 JSON，没有新方法白名单；测试仅用该通用传输分支，不用旧 schema 或 MCP 工具目录。报告必须明确这是共享旧版 RPC transport，不能称为新版配套 agent。基准新旧使用同一个 WebView2 路径，报告记录版本与哈希；若任一版本或视口不一致，结果需说明差异，不可直接宣称满足同条件目标。
+
+基线现场核实：dist/CutFlow/CutFlow.exe 的 Windows 文件版本为 0.5.0.0，build-info.json 的 commit 为 6202e3e68d998714842b8ac79ebb2d1c367f3101、cloud_run 为 39030223570。本次重新计算 EXE SHA-256 为 4a3efce686e9397e0613d3eb11129dd9bb32926e13dae1d3a5a7231727273da0，agent 为 d2dfe18eb5d214d0007a2c948809d35ae77c5481fd5aa9a639049263ed05cf69，均与该 manifest 一致。验证过程未启动或修改用户安装程序。
+
+导航验收临时清理：.build/navigation-compare-20261018（首轮启动时序探测）与 .build/navigation-compare-20261018-r2（正式四场景）已移至回收站，共251,120,458字节，239.49 MiB。正式工具、原始JSON与报告保留；清理文件名和大小见 verification-20261018-creation/navigation-cleanup.json。无本轮测试主窗口/WebView2子进程遗留，用户原安装程序未改动。
