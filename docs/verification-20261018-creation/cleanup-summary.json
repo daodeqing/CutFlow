@@ -138,9 +138,33 @@
       "bytes": 41483064,
       "sizeMiB": 39.561,
       "status": "recycled"
+    },
+    {
+      "path": ".build\\cargo\\registry",
+      "bytes": 788240821,
+      "sizeMiB": 751.725,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\pnpm-store",
+      "bytes": 1646216625,
+      "sizeMiB": 1569.955,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\rustup\\downloads",
+      "bytes": 0,
+      "sizeMiB": 0.0,
+      "status": "recycled"
+    },
+    {
+      "path": ".build\\rustup\\tmp",
+      "bytes": 0,
+      "sizeMiB": 0.0,
+      "status": "recycled"
     }
   ],
-  "CutFlowTotalBytes": 6688483038,
+  "CutFlowTotalBytes": 9122940484,
   "pluginInitialBytes": 210316000,
   "pluginFinalBytes": 1323676023,
   "pluginReport": "../cpa-plugin-GFlow/docs/cleanup-final-0.1.12.json",
@@ -152,7 +176,7 @@
   ],
   "existingUserInstallationChanged": false,
   "ownedTestProcessesStopped": true,
-  "totalBytes": 8222475061,
-  "totalGiB": 7.658,
-  "totalGB": 8.222
+  "totalBytes": 10656932507,
+  "totalGiB": 9.925,
+  "totalGB": 10.657
 }

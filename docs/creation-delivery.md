@@ -42,5 +42,5 @@
 
 ## 清理
 
-累计移入回收站 8,222,475,061 字节，约 8.222 GB / 7.658 GiB。文件/目录名、字节数和状态见 verification-20261018-creation/cleanup-summary.json。
+累计移入回收站 10,656,932,507 字节，约 10.657 GB / 9.925 GiB。文件/目录名、字节数和状态见 verification-20261018-creation/cleanup-summary.json。
 测试应用、WebView2子进程、临时CPA和Vite均已关闭。保留源码、正式复用工具、截图与测量记录、最终插件包，以及D盘Node/Rust工具和已安装依赖；原有安装、媒体与portable未改。

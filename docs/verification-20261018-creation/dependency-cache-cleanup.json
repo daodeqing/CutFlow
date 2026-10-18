@@ -1,0 +1,26 @@
+[
+  {
+    "path": ".build\\cargo\\registry",
+    "bytes": 788240821,
+    "sizeMiB": 751.725,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\pnpm-store",
+    "bytes": 1646216625,
+    "sizeMiB": 1569.955,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\rustup\\downloads",
+    "bytes": 0,
+    "sizeMiB": 0.0,
+    "status": "recycled"
+  },
+  {
+    "path": ".build\\rustup\\tmp",
+    "bytes": 0,
+    "sizeMiB": 0.0,
+    "status": "recycled"
+  }
+]
