@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import WabiVisuals from '../../shared/ui/WabiVisuals.vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useAccountStore } from '../../shared/stores/account';
 import { useUiStore } from '../../shared/stores/ui';
@@ -11,7 +10,6 @@ import AppearanceMenu from '../../shared/ui/AppearanceMenu.vue';
 import AppAccountMenu from './AppAccountMenu.vue';
 import { navItems, useNavigationStatus } from '../../shared/features/navigation';
 const ui = useUiStore();
-const designOpen = ref(false);
 const navCollapsed = ref(false);
 const account = useAccountStore();
 const updater = useUpdateStore();
@@ -33,7 +31,6 @@ const { transferBadgeCount, attentionCount, queueHealthLabel, aggregateSpeedLabe
     class="app-shell"
     :class="{ 'platform-macos': isMacOs, 'nav-collapsed': navCollapsed || ui.activeTab === 'creation' }"
   >
-    <WabiVisuals v-model="designOpen" />
     <header class="app-titlebar" data-tauri-drag-region @dblclick="toggleMaximizeWindow">
       <div class="titlebar-brand" data-tauri-drag-region>
         <span class="titlebar-mark" aria-hidden="true"><img :src="brandMark" alt="" /></span>
@@ -45,15 +42,6 @@ const { transferBadgeCount, attentionCount, queueHealthLabel, aggregateSpeedLabe
         <button v-if="updater.hasUpdate" class="titlebar-update" type="button" @click="ui.setTab('settings')">
           <UIcon name="i-tabler-arrow-up-circle" aria-hidden="true" />
           可更新至 v{{ updater.availableVersion }}
-        </button>
-        <button
-          class="wabi-spec-trigger"
-          type="button"
-          aria-label="Wabi 液体玻璃方案与样例图"
-          @dblclick.stop
-          @click="designOpen = true"
-        >
-          <UIcon name="i-tabler-stack-2" aria-hidden="true" /><span>Wabi 液体玻璃方案与样例图</span>
         </button>
         <AppearanceMenu />
         <AppAccountMenu />

@@ -3742,7 +3742,7 @@ test.describe('CutFlow 0.5 compact creation', () => {
             ...Array.from({ length: 16 }, (_, index) => ({ id: 'gflow-custom-long-model-name-for-scroll-and-overflow-' + index, kind: 'image', maxReferences: 3 })),
           ];
           runtime.invoke = async (command, args) => {
-            if (command === 'plugin:app|version') return '0.6.0';
+            if (command === 'plugin:app|version') return '0.6.1';
             if (command === 'cutflow_call') {
               if (args?.method === 'cutflow.hub.snapshot') return {
                 connection: { baseUrl: 'http://127.0.0.1:8317/v1' }, models, references: [], fault: null,
@@ -3944,22 +3944,7 @@ test.describe('Wabi liquid glass acceptance', () => {
       await expect(page.locator('.app-shell')).toHaveClass(/nav-collapsed/);
       await page.getByRole('button', { name: '展开导航', exact: true }).click();
       await expect(page.locator('.app-shell')).not.toHaveClass(/nav-collapsed/);
-      await page.getByRole('button', { name: 'Wabi 液体玻璃方案与样例图', exact: true }).click();
-      const modal = page.getByRole('dialog', { name: 'Wabi 液体玻璃方案与样例图', exact: true });
-      await expect(modal).toBeVisible();
-      const slider = page.getByLabel('折射位移强度');
-      await slider.fill('32');
-      await expect(page.locator('#wabi-liquid-refract feDisplacementMap')).toHaveAttribute('scale', '32');
-      await slider.fill('0');
-      await expect(page.locator('#wabi-liquid-refract feDisplacementMap')).toHaveAttribute('scale', '0');
-      await slider.fill('14');
-      await page.getByRole('button', { name: '下载队列与诊断', exact: true }).click();
-      await expect(page.locator('.wabi-sample img')).toHaveAttribute('alt', /下载队列与诊断/);
-      await modal.locator('[data-slot="body"]').evaluate(el => { el.scrollTop = 0; });
-      await page.screenshot({ path: testInfo.outputPath('wabi-spec-' + theme + '.png'), animations: 'disabled' });
-      await page.keyboard.press('Escape');
-      await expect(modal).toBeHidden();
-      await expect(page.getByRole('button', { name: 'Wabi 液体玻璃方案与样例图', exact: true })).toBeFocused();
+       await expect(page.getByRole('button', { name: 'Wabi 液体玻璃方案与样例图', exact: true })).toHaveCount(0);
       await page.keyboard.press('Control+4');
       await expect(page.locator('.settings-panel')).toBeVisible();
       await expect(page.locator('.main-region > .workspace-enter-active, .main-region > .workspace-leave-active')).toHaveCount(0);
@@ -3970,19 +3955,13 @@ test.describe('Wabi liquid glass acceptance', () => {
       await page.screenshot({ path: testInfo.outputPath('wabi-editor-' + theme + '.png'), animations: 'disabled' });
       expect(errors).toEqual([]);
     });
-    test(theme + ' narrow desktop keeps optical controls reachable', async ({ page }, testInfo) => {
+    test(theme + ' narrow desktop keeps the compact titlebar usable', async ({ page }, testInfo) => {
       await page.setViewportSize({ width: 390, height: 844 });
       await installTauriMock(page, theme, true, true);
       await page.goto('/');
-      const trigger = page.getByRole('button', { name: 'Wabi 液体玻璃方案与样例图', exact: true });
-      await expect(trigger).toBeInViewport();
-      await trigger.click();
-      await expect(page.getByLabel('折射位移强度')).toBeInViewport();
-      const rect = await page.getByRole('dialog', { name: 'Wabi 液体玻璃方案与样例图', exact: true }).boundingBox();
-      expect(rect!.x).toBeGreaterThanOrEqual(0);
-      expect(rect!.x + rect!.width).toBeLessThanOrEqual(390);
+      await expect(page.getByRole('button', { name: 'Wabi 液体玻璃方案与样例图', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: /外观：/ })).toBeInViewport();
       await page.screenshot({ path: testInfo.outputPath('wabi-narrow-' + theme + '.png'), animations: 'disabled' });
-      await page.keyboard.press('Escape');
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
     });
   }

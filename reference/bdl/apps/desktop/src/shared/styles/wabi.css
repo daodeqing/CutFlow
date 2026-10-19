@@ -76,8 +76,7 @@
   box-shadow: var(--wabi-bevel);
   border-radius: 14px;
 }
-.app-shell .ui-button.variant-primary,
-.wabi-spec-trigger {
+.app-shell .ui-button.variant-primary {
   background: linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 92%, white), var(--color-accent-strong));
   color: var(--color-on-accent);
   box-shadow:
@@ -158,25 +157,6 @@
 }
 .app-shell .task-detail-line .progress-track {
   flex-shrink: 1;
-}
-.wabi-spec-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 30px;
-  padding: 0 11px;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
-  border-radius: 9px;
-  background: var(--wabi-pill);
-  color: var(--color-accent-strong);
-  white-space: nowrap;
-  font-size: 12px;
-}
-.wabi-spec-trigger .iconify {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
 }
 .nav-collapse-toggle {
   display: flex;
@@ -375,13 +355,6 @@
   }
 }
 @media (max-width: 900px) {
-  .wabi-spec-trigger span {
-    display: none;
-  }
-  .wabi-spec-trigger {
-    width: 32px;
-    padding: 0;
-  }
   .app-shell .titlebar-name {
     display: none;
   }
