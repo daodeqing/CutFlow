@@ -296,6 +296,9 @@ pub struct StreamResult {
     pub done: bool,
     pub control: Option<Value>,
     pub progress: Option<ProgressUpdate>,
+    media_id: Option<String>,
+    media_mime: Option<String>,
+    media_base64: String,
 }
 
 impl StreamResult {
@@ -309,6 +312,10 @@ impl StreamResult {
         }
         let payload: Value = serde_json::from_str(data)
             .map_err(|_| Error::new("result_unknown", "生成服务返回无效消息，结果待核查"))?;
+        if let Some(media) = payload.get("gflow_media") {
+            self.media_chunk(media)?;
+            return Ok(());
+        }
         if let Some(control) = payload.get("gflow_control") { self.control = Some(control.clone()); }
         if let Some(progress) = progress_from_payload(&payload) { self.progress = Some(progress); }
         if payload.get("error").is_some() {
@@ -349,6 +356,44 @@ impl StreamResult {
             return Err(Error::new("provider_error", "生成服务响应超过安全长度"));
         }
         self.content.push_str(&part);
+        Ok(())
+    }
+
+    fn media_chunk(&mut self, media: &Value) -> Result<()> {
+        let id = media.get("id").and_then(Value::as_str).unwrap_or("");
+        let mime = media.get("mime").and_then(Value::as_str).unwrap_or("");
+        if media.get("encoding").and_then(Value::as_str) != Some("base64") {
+            return Err(Error::new("invalid_media", "生成服务返回了不支持的媒体编码"));
+        }
+        let valid_id = id.len() >= 32 && id.len() <= 40
+            && id.bytes().all(|c| c.is_ascii_hexdigit() || c == b'_' || c == b'.');
+        if !valid_id || !matches!(mime, "image/png" | "image/jpeg" | "image/webp" | "video/mp4" | "video/webm" | "video/quicktime") {
+            return Err(Error::new("invalid_media", "生成服务返回了无效的媒体分片"));
+        }
+        if self.media_id.as_deref().is_some_and(|current| current != id) {
+            return Err(Error::new("invalid_media", "生成服务返回了多个媒体分片"));
+        }
+        if self.media_mime.as_deref().is_some_and(|current| current != mime) {
+            return Err(Error::new("invalid_media", "生成服务返回了不一致的媒体类型"));
+        }
+        let chunk = media.get("chunk").and_then(Value::as_str).unwrap_or("");
+        if chunk.len() > 100_000 || !chunk.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'+' | b'/' | b'=')) {
+            return Err(Error::new("invalid_media", "生成服务返回了无效的媒体编码"));
+        }
+        if self.media_base64.len() + chunk.len() > 180 * 1024 * 1024 {
+            return Err(Error::new("provider_error", "生成媒体超过安全长度"));
+        }
+        self.media_id = Some(id.to_owned());
+        self.media_mime = Some(mime.to_owned());
+        self.media_base64.push_str(chunk);
+        if media.get("done").and_then(Value::as_bool) == Some(true) {
+            if self.media_base64.is_empty()
+                || base64::engine::general_purpose::STANDARD.decode(&self.media_base64).is_err()
+            {
+                return Err(Error::new("invalid_media", "生成服务返回了不完整的媒体分片"));
+            }
+            self.url = Some(format!("data:{};base64,{}", mime, self.media_base64));
+        }
         Ok(())
     }
 

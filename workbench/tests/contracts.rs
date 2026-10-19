@@ -605,6 +605,19 @@ fn structured_stage_progress_is_safe_and_kept_separate_from_media() {
 }
 
 #[test]
+fn streamed_media_chunks_reassemble_without_a_large_single_event() {
+    use base64::Engine;
+    let bytes = b"synthetic-large-media";
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let mut stream = StreamResult::default();
+    stream.event(&json!({"gflow_media":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_2K.jpg","mime":"image/jpeg","encoding":"base64","chunk":encoded,"done":false}}).to_string()).unwrap();
+    assert!(stream.url.is_none());
+    stream.event(&json!({"gflow_media":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_2K.jpg","mime":"image/jpeg","encoding":"base64","chunk":"","done":true}}).to_string()).unwrap();
+    assert_eq!(stream.media_url().unwrap(), format!("data:image/jpeg;base64,{encoded}"));
+    assert!(stream.event(&json!({"gflow_media":{"id":"../secret.jpg","mime":"image/jpeg","chunk":"","done":true}}).to_string()).is_err());
+}
+
+#[test]
 fn generation_callback_only_receives_sanitized_stage_progress() {
     let events = [
         json!({"choices":[{"delta":{"reasoning_content":"正在生成图片"}}]}),
