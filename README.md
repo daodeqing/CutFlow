@@ -1,6 +1,6 @@
 # CutFlow Windows 视频剪辑工作台
 
-CutFlow 0.6.2 提供 B站账号登录与下载、独立 Concat 剪辑窗口，以及按项目和聊天组织的图片、视频创作工作台。AI 创作采用左侧项目与聊天、中间滚动生成记录、右侧模型与参数的布局；窄窗口通过抽屉访问两侧面板。当前验证状态见 [验收与已知限制](docs/验收与已知限制.md)，使用步骤及 MCP / CLI 参数见 [创作与外部 AI](docs/创作与外部AI.md)。
+CutFlow 0.6.3 提供 B站账号登录与下载、独立 Concat 剪辑窗口，以及按项目和聊天组织的图片、视频创作工作台。AI 创作采用左侧项目与聊天、中间滚动生成记录、右侧模型与参数的布局；窄窗口通过抽屉访问两侧面板。当前验证状态见 [验收与已知限制](docs/验收与已知限制.md)，使用步骤及 MCP / CLI 参数见 [创作与外部 AI](docs/创作与外部AI.md)。
 
 ## 使用
 
@@ -28,7 +28,7 @@ python -B -X utf8 scripts/build_windows.py --installer
 
 不需要安装包时省略 `--installer`。旧的 PowerShell 7 入口 `scripts/Build-Windows.ps1` 仅转发给同一 Python 构建器。首次构建要下载较多依赖；构建器验证上游锁定的 FFmpeg、ONNX 和 sherpa SHA256，libclang 使用指定版本的 Python wheel。生成包未签名。
 
-成功输出为 `dist/CutFlow-0.6.2-windows-x64.zip`、SHA256 和可选 Setup；包含主窗口、独立编辑器、BDL、FFmpeg、ffprobe、cutflow-agent、固定 WebView2、DLL、说明、TaskSpec 示例和许可证。WebView2 从微软官方下载并验证锁定 SHA256，随包运行，不安装到系统。打包拒绝覆盖现有同名发行目录。
+成功输出为 `dist/CutFlow-0.6.3-windows-x64.zip`、SHA256 和可选 Setup；包含主窗口、独立编辑器、BDL、FFmpeg、ffprobe、cutflow-agent、固定 WebView2、DLL、说明、TaskSpec 示例和许可证。WebView2 从微软官方下载并验证锁定 SHA256，随包运行，不安装到系统。打包拒绝覆盖现有同名发行目录。
 
 GitHub Actions 在 main 推送后自动构建，也支持手动运行；只有构建及启动检查成功才上传产物。真实账号权限、付费生成、最终音画效果需要单独实测，模拟测试不能替代。
 

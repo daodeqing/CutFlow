@@ -365,8 +365,7 @@ impl StreamResult {
         if media.get("encoding").and_then(Value::as_str) != Some("base64") {
             return Err(Error::new("invalid_media", "生成服务返回了不支持的媒体编码"));
         }
-        let valid_id = id.len() >= 32 && id.len() <= 40
-            && id.bytes().all(|c| c.is_ascii_hexdigit() || c == b'_' || c == b'.');
+        let valid_id = valid_cached_media_id(id);
         if !valid_id || !matches!(mime, "image/png" | "image/jpeg" | "image/webp" | "video/mp4" | "video/webm" | "video/quicktime") {
             return Err(Error::new("invalid_media", "生成服务返回了无效的媒体分片"));
         }
@@ -416,6 +415,13 @@ impl StreamResult {
             "未收到最终媒体地址，请先核查服务端生成历史",
         ))
     }
+}
+
+fn valid_cached_media_id(id: &str) -> bool {
+    let Some((stem, extension)) = id.rsplit_once('.') else { return false; };
+    if !matches!(extension, "png" | "jpg" | "jpeg" | "webp" | "mp4" | "webm" | "mov") { return false; }
+    let base = stem.strip_suffix("_2K").or_else(|| stem.strip_suffix("_4K")).unwrap_or(stem);
+    base.len() == 32 && base.bytes().all(|c| c.is_ascii_hexdigit())
 }
 
 async fn cancellable<F: std::future::Future>(future: F, cancel: &AtomicBool) -> Result<F::Output> {
