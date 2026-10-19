@@ -607,14 +607,16 @@ fn structured_stage_progress_is_safe_and_kept_separate_from_media() {
 #[test]
 fn streamed_media_chunks_reassemble_without_a_large_single_event() {
     use base64::Engine;
+    use sha2::Digest;
     let bytes = b"synthetic-large-media";
     let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    let digest = format!("{:x}", sha2::Sha256::digest(bytes));
     let mut stream = StreamResult::default();
-    stream.event(&json!({"gflow_media":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_2K.jpg","mime":"image/jpeg","encoding":"base64","chunk":encoded,"done":false}}).to_string()).unwrap();
+    stream.event(&json!({"gflow_media":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_2K.jpg","mime":"image/jpeg","encoding":"base64","chunk":encoded,"seq":0,"total":1,"size":bytes.len(),"sha256":digest,"done":false}}).to_string()).unwrap();
     assert!(stream.url.is_none());
-    stream.event(&json!({"gflow_media":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_2K.jpg","mime":"image/jpeg","encoding":"base64","chunk":"","done":true}}).to_string()).unwrap();
+    stream.event(&json!({"gflow_media":{"id":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa_2K.jpg","mime":"image/jpeg","encoding":"base64","chunk":"","seq":1,"total":1,"size":bytes.len(),"sha256":digest,"done":true}}).to_string()).unwrap();
     assert_eq!(stream.media_url().unwrap(), format!("data:image/jpeg;base64,{encoded}"));
-    assert!(stream.event(&json!({"gflow_media":{"id":"../secret.jpg","mime":"image/jpeg","chunk":"","done":true}}).to_string()).is_err());
+    assert!(stream.event(&json!({"gflow_media":{"id":"../secret.jpg","mime":"image/jpeg","encoding":"base64","chunk":"","seq":0,"total":1,"size":bytes.len(),"sha256":digest,"done":true}}).to_string()).is_err());
 }
 
 #[test]

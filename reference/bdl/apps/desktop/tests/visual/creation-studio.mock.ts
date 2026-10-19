@@ -46,7 +46,7 @@ const installTauriMock = async (
             args?: { request?: { kind?: string; input?: string; source_id?: string; limit?: number } },
           ) => {
             invocations.push(command);
-            if (command === 'plugin:app|version') return '0.6.3';
+            if (command === 'plugin:app|version') return '0.6.4';
             if (command === 'account_get') {
               return accountLoggedIn
                 ? { logged_in: true, name: '测试用户', avatar_url: null, mid: '42', vip_label: null }

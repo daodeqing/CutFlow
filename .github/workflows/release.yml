@@ -9,7 +9,7 @@ on:
       tag:
         description: Release version matching the package
         required: true
-        default: 'v0.6.3'
+        default: 'v0.6.4'
 permissions:
   contents: write
   actions: read

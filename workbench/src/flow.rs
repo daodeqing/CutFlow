@@ -2,6 +2,7 @@ use crate::{Error, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     fs::File,
     io::{Read, Write},
@@ -299,6 +300,10 @@ pub struct StreamResult {
     media_id: Option<String>,
     media_mime: Option<String>,
     media_base64: String,
+    media_next_seq: u32,
+    media_total: Option<u32>,
+    media_size: Option<usize>,
+    media_sha256: Option<String>,
 }
 
 impl StreamResult {
@@ -312,7 +317,9 @@ impl StreamResult {
         }
         let payload: Value = serde_json::from_str(data)
             .map_err(|_| Error::new("result_unknown", "生成服务返回无效消息，结果待核查"))?;
-        if let Some(media) = payload.get("gflow_media") {
+        let choice_media = payload["choices"].as_array().and_then(|choices| choices.first())
+            .and_then(|choice| choice["delta"].get("gflow_media"));
+        if let Some(media) = payload.get("gflow_media").or(choice_media) {
             self.media_chunk(media)?;
             return Ok(());
         }
@@ -366,7 +373,7 @@ impl StreamResult {
             return Err(Error::new("invalid_media", "生成服务返回了不支持的媒体编码"));
         }
         let valid_id = valid_cached_media_id(id);
-        if !valid_id || !matches!(mime, "image/png" | "image/jpeg" | "image/webp" | "video/mp4" | "video/webm" | "video/quicktime") {
+        if !valid_id || !matches!(mime, "image/png" | "image/jpeg" | "image/webp") {
             return Err(Error::new("invalid_media", "生成服务返回了无效的媒体分片"));
         }
         if self.media_id.as_deref().is_some_and(|current| current != id) {
@@ -376,6 +383,20 @@ impl StreamResult {
             return Err(Error::new("invalid_media", "生成服务返回了不一致的媒体类型"));
         }
         let chunk = media.get("chunk").and_then(Value::as_str).unwrap_or("");
+        let seq = media.get("seq").and_then(Value::as_u64).filter(|value| *value <= u32::MAX as u64)
+            .map(|value| value as u32).ok_or_else(|| Error::new("invalid_media", "生成服务缺少媒体分片序号"))?;
+        let total = media.get("total").and_then(Value::as_u64).filter(|value| *value > 0 && *value <= u32::MAX as u64)
+            .map(|value| value as u32).ok_or_else(|| Error::new("invalid_media", "生成服务缺少媒体分片总数"))?;
+        let size = media.get("size").and_then(Value::as_u64).filter(|value| *value > 0 && *value <= usize::MAX as u64)
+            .map(|value| value as usize).ok_or_else(|| Error::new("invalid_media", "生成服务缺少媒体原始大小"))?;
+        let digest = media.get("sha256").and_then(Value::as_str)
+            .filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit()))
+            .ok_or_else(|| Error::new("invalid_media", "生成服务缺少媒体校验值"))?;
+        if seq != self.media_next_seq || self.media_total.is_some_and(|value| value != total)
+            || self.media_size.is_some_and(|value| value != size)
+            || self.media_sha256.as_deref().is_some_and(|value| value != digest) {
+            return Err(Error::new("invalid_media", "生成服务媒体分片顺序或元数据不一致"));
+        }
         if chunk.len() > 100_000 || !chunk.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'+' | b'/' | b'=')) {
             return Err(Error::new("invalid_media", "生成服务返回了无效的媒体编码"));
         }
@@ -384,14 +405,23 @@ impl StreamResult {
         }
         self.media_id = Some(id.to_owned());
         self.media_mime = Some(mime.to_owned());
+        self.media_total = Some(total);
+        self.media_size = Some(size);
+        self.media_sha256 = Some(digest.to_owned());
         self.media_base64.push_str(chunk);
         if media.get("done").and_then(Value::as_bool) == Some(true) {
-            if self.media_base64.is_empty()
-                || base64::engine::general_purpose::STANDARD.decode(&self.media_base64).is_err()
-            {
+            if seq != total || self.media_next_seq != total {
                 return Err(Error::new("invalid_media", "生成服务返回了不完整的媒体分片"));
             }
+            let bytes = base64::engine::general_purpose::STANDARD.decode(&self.media_base64)
+                .map_err(|_| Error::new("invalid_media", "生成服务返回了无效的媒体编码"))?;
+            if bytes.len() != size || format!("{:x}", Sha256::digest(&bytes)) != digest {
+                return Err(Error::new("invalid_media", "生成服务媒体校验失败"));
+            }
             self.url = Some(format!("data:{};base64,{}", mime, self.media_base64));
+        } else {
+            if seq >= total { return Err(Error::new("invalid_media", "生成服务媒体分片总数无效")); }
+            self.media_next_seq = self.media_next_seq.saturating_add(1);
         }
         Ok(())
     }
@@ -478,8 +508,11 @@ pub fn generate(
     }
     let mut payload = json!({"model":model,"messages":[{"role":"user","content":content}],"stream":request["stream"].as_bool().unwrap_or(true)});
     if model.starts_with("gflow-") && url::Url::parse(&connection.base_url).is_ok_and(|url| matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))) { payload["client_process_id"] = json!(std::process::id()); }
-    for field in ["aspect_ratio", "duration", "quality", "image_size", "client_request_id", "gflow_workspace_id", "gflow_project_id", "gflow_instance_id"] {
+    for field in ["aspect_ratio", "duration", "quality", "image_size", "client_request_id", "gflow_workspace_id", "gflow_project_id", "gflow_instance_id", "gflow_media_protocol"] {
         if let Some(value) = request.get(field).filter(|value| !value.is_null() && value.as_str() != Some("auto")) { payload[field] = value.clone(); }
+    }
+    if model.starts_with("gflow-") && url::Url::parse(&connection.base_url).is_ok_and(|url| matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"))) {
+        payload["gflow_media_protocol"] = json!("v1");
     }
     if model.starts_with("gflow-") || model.contains("gemini") || model.contains("banana") {
         let mut image_config = json!({});
