@@ -145,7 +145,8 @@ test('model, ratio and image size changes only affect the next generation', asyn
   await page.setViewportSize({ width: 1440, height: 900 })
   await openStudio(page)
   const previousText = await page.locator('.creation-turn').first().innerText()
-  await page.locator('.creation-parameters').getByRole('button', { name: /Nano Banana Pro/ }).click()
+  await page.getByRole('button', { name: '选择生成模型', exact: true }).click()
+  await page.locator('.creation-model-popover').getByRole('button', { name: /Nano Banana Pro/ }).click()
   await page.locator('#ai-aspect').selectOption('1:1')
   await page.locator('#ai-image-size').selectOption('4K')
   expect(await page.locator('.creation-turn').first().innerText()).toBe(previousText)
@@ -155,6 +156,92 @@ test('model, ratio and image size changes only affect the next generation', asyn
   expect(generation.model).toBe('gflow-nano-banana-pro')
   expect(generation.aspect_ratio).toBe('1:1')
   expect(generation.image_size).toBe('4K')
+})
+
+test('the model picker overlays parameter fields and closes with keyboard, outside click and selection', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 900 })
+  await openStudio(page)
+  const trigger = page.getByRole('button', { name: '选择生成模型', exact: true })
+  const popover = page.locator('.creation-model-popover')
+  const ratio = page.locator('#ai-aspect')
+  const originalBounds = await ratio.boundingBox()
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  await trigger.focus()
+  await trigger.press('Enter')
+  await expect(popover).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '搜索模型', exact: true })).toBeFocused()
+  expect(await ratio.boundingBox()).toEqual(originalBounds)
+  expect(await page.locator('.creation-parameters .creation-model-popover').count()).toBe(0)
+  await page.keyboard.press('Escape')
+  await expect(popover).toBeHidden()
+  await expect(trigger).toBeFocused()
+  await trigger.click()
+  await expect(popover).toBeVisible()
+  await page.locator('.conversation-heading h1').click()
+  await expect(popover).toBeHidden()
+  await trigger.click()
+  await popover.getByRole('button', { name: /Nano Banana Pro/ }).click()
+  await expect(popover).toBeHidden()
+  await expect(trigger).toContainText('Nano Banana Pro')
+  expect(await ratio.boundingBox()).toEqual(originalBounds)
+})
+
+test('generation progress animates and updates stage percentages while image cards load originals', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await installCreationStudioMock(page, 'light', { initialRunning: true })
+  await page.addInitScript(() => {
+    const target = window as unknown as {
+      __TAURI_INTERNALS__: { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>; convertFileSrc: (path: string) => string }
+      __CREATION_FIXTURE__: { jobs: Array<Record<string, unknown>> }
+      __PROGRESS_FIXTURE__: { percent: number; stage: string }
+    }
+    target.__PROGRESS_FIXTURE__ = { percent: 37, stage: '正在生成第 1 张' }
+    const invoke = target.__TAURI_INTERNALS__.invoke
+    const convert = target.__TAURI_INTERNALS__.convertFileSrc
+    target.__TAURI_INTERNALS__.convertFileSrc = path => convert(path) + (path.endsWith('card-thumb.jpg') ? '#thumbnail' : '#original')
+    target.__TAURI_INTERNALS__.invoke = async (command, args) => {
+      const response = await invoke(command, args)
+      if (command !== 'cutflow_call') return response
+      if (args?.method === 'cutflow.creation.turns.list') {
+        const listing = response as { turns: Array<{ job: { result?: { assets?: Array<{ thumbnail?: string }> } } }> }
+        for (const turn of listing.turns) {
+          for (const asset of turn.job.result?.assets || []) asset.thumbnail = 'D:/fixture/card-thumb.jpg'
+        }
+      }
+      if (args?.method === 'cutflow.jobs.list') {
+        const listing = response as { jobs: Array<Record<string, unknown>> }
+        const running = target.__CREATION_FIXTURE__.jobs.findLast(job => job.status === 'running')
+        if (running) {
+          listing.jobs = listing.jobs.filter(job => job.id !== running.id)
+          listing.jobs.push({ ...JSON.parse(JSON.stringify(running)), progress: { ...target.__PROGRESS_FIXTURE__ } })
+        }
+      }
+      return response
+    }
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'AI 创作', exact: true }).click()
+  const image = page.locator('.turn-assets img').last()
+  await expect(image).toHaveAttribute('src', /#original$/)
+  await expect(image).toHaveAttribute('loading', 'lazy')
+  await expect(page.locator('.composer-reference img')).toHaveAttribute('src', /#thumbnail$/)
+  await submit(page, '只在模拟夹具中检查进度')
+  const progress = page.locator('.creation-turn').last().locator('.generation-progress')
+  await expect(progress.locator('.generation-stage')).toHaveText('正在生成第 1 张')
+  await expect(progress.locator('.generation-percent')).toHaveText('阶段进度 37%')
+  await expect(progress.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '37')
+  expect(await progress.locator('.generation-spinner').evaluate(el => getComputedStyle(el).animationName)).toContain('creation-progress-spin')
+  expect(await progress.locator('.progress-fill').evaluate(el => getComputedStyle(el).animationName)).toContain('wabi-liquid-flow')
+  await page.evaluate(() => {
+    (window as unknown as { __PROGRESS_FIXTURE__: { percent: number; stage: string } }).__PROGRESS_FIXTURE__ = { percent: 84, stage: '正在放大至 4K' }
+  })
+  await expect(progress.locator('.generation-stage')).toHaveText('正在放大至 4K')
+  await expect(progress.locator('.generation-percent')).toHaveText('阶段进度 84%')
+  await expect(progress.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '84')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect.poll(() => progress.locator('.generation-spinner').evaluate(el => getComputedStyle(el).animationName)).toBe('none')
+  expect((await calls(page, 'cutflow.generate')).length).toBe(1)
 })
 
 test('hidden windows pause generation status reads and resume without sending a paid generation', async ({ page }) => {

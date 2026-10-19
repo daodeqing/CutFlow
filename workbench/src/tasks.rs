@@ -19,6 +19,8 @@ pub struct Job {
     pub params: Value,
     pub status: String,
     pub stage: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<flow::ProgressUpdate>,
     pub result: Option<Value>,
     pub error: Option<Error>,
     #[serde(default)]
@@ -252,6 +254,24 @@ impl Runtime {
     }
 
     pub fn update(&self, id: &str, stage: &str) {
+        self.checkpoint(id, stage, None);
+    }
+
+    fn generation_progress(&self, id: &str, index: u64, count: u64, update: flow::ProgressUpdate) {
+        self.item_progress(id, "generating", index, count, update);
+    }
+
+    fn download_progress(&self, id: &str, index: u64, count: u64, update: flow::ProgressUpdate) {
+        self.item_progress(id, "downloading", index, count, update);
+    }
+
+    fn item_progress(&self, id: &str, phase: &str, index: u64, count: u64, update: flow::ProgressUpdate) {
+        let update = combined_progress(index, count, update);
+        let stage = format!("{phase}: 第 {}/{} 项；{}", index + 1, count, update.stage);
+        self.checkpoint(id, &stage, Some(update));
+    }
+
+    fn checkpoint(&self, id: &str, stage: &str, progress: Option<flow::ProgressUpdate>) {
         {
             let mut store = self.store.lock().unwrap();
             store.revision = store.revision.saturating_add(1);
@@ -260,6 +280,13 @@ impl Runtime {
                 job.revision = revision;
                 job.updated_at = creation::now();
                 job.stage = stage.into();
+                if let Some(mut progress) = progress {
+                    // A receipt or a provider's 100% does not mean local media is saved.
+                    let previous = job.progress.as_ref().and_then(|value| value.percent).map(|value| value.min(99));
+                    progress.percent = progress.percent.map(|value| value.min(99))
+                        .map(|value| value.max(previous.unwrap_or(0))).or(previous);
+                    job.progress = Some(progress);
+                }
             }
         }
         if let Err(error) = self.persist() {
@@ -287,6 +314,9 @@ impl Runtime {
                     Ok(result) => {
                         job.status = "completed".into();
                         job.stage = "已完成".into();
+                        if job.method == "cutflow.generate" {
+                            job.progress = Some(flow::ProgressUpdate::stage("作品已保存", Some(100)));
+                        }
                         job.result = Some(result);
                         job.error = None;
                     }
@@ -313,6 +343,7 @@ impl Runtime {
                 job.revision = revision;
                 job.updated_at = creation::now();
                 job.status = "result_unknown".into();
+                if let Some(progress) = &mut job.progress { progress.percent = progress.percent.map(|value| value.min(99)); }
                 job.stage = format!("结果未持久化：{}。退出前请保留素材", error.message);
                 job.error = Some(error);
             }
@@ -359,7 +390,7 @@ impl Runtime {
         let job = Job {
             revision:store.revision, created_at:timestamp, updated_at:timestamp,
             id:uuid::Uuid::new_v4().to_string(), operation_id:operation, method:method.into(), params,
-            status:"running".into(), stage:"queued".into(), result:None, error:None,
+            status:"running".into(), stage:"queued".into(), progress:None, result:None, error:None,
         };
         let cancel = Arc::new(AtomicBool::new(false));
         self.cancels.lock().unwrap().insert(job.id.clone(), cancel.clone());
@@ -492,6 +523,7 @@ impl Runtime {
                 let previous = job.clone();
                 job.status = "running".into();
                 job.stage = "downloading".into();
+                job.progress = Some(flow::ProgressUpdate::stage("只重试下载已有结果", previous.progress.as_ref().and_then(|value| value.percent).map(|value| value.min(99))));
                 job.error = None;
                 {
                     let mut store = self.store.lock().unwrap();
@@ -513,7 +545,7 @@ impl Runtime {
                     return Err(error);
                 }
                 let runtime = self.clone();
-                std::thread::spawn(move || { let result = runtime.download_generation(&job, &folder, &cancel); runtime.finish(&job.id, result); });
+                std::thread::spawn(move || { let result = runtime.download_generation(&job, &folder, &cancel, true); runtime.finish(&job.id, result); });
                 Ok(json!({"jobId":id,"status":"running"}))
             }
             "cutflow.jobs.list" => Ok(self.jobs_list(&params)),
@@ -609,7 +641,7 @@ impl Runtime {
         }
     }
 
-    fn download_generation(&self, job: &Job, folder: &Path, cancel: &AtomicBool) -> Result<Value> {
+    fn download_generation(&self, job: &Job, folder: &Path, cancel: &AtomicBool, download_only: bool) -> Result<Value> {
         let receipt: Value = serde_json::from_slice(&std::fs::read(folder.join("generation-result.json"))?)?;
         let connection: flow::Connection = receipt.get("connection").cloned().map(serde_json::from_value).transpose()?
             .unwrap_or_else(|| self.store.lock().unwrap().connection.clone());
@@ -618,10 +650,16 @@ impl Runtime {
         let urls = receipt["urls"].as_array().cloned().unwrap_or_else(|| vec![receipt["url"].clone()]);
         let mut assets = Vec::new();
         let mut thumbnail = None;
+        let count = if download_only { urls.len().max(1) as u64 } else { job.params["n"].as_u64().unwrap_or(1).max(1) };
         for (index, url) in urls.iter().enumerate() {
             let destination = folder.join(format!("generated-{index}.{extension}"));
             let existing = ["png", "jpg", "webp", "mp4", "webm", "mov"].iter().map(|ext| destination.with_extension(ext)).find(|path| path.is_file());
+            if existing.is_none() {
+                self.download_progress(&job.id, index as u64, count,
+                    flow::ProgressUpdate::stage(if download_only { "只重试下载已有结果" } else { "生成完成，正在下载原图" }, Some(92)));
+            }
             let path = match existing { Some(path) => path, None => flow::download(&connection, url.as_str().ok_or_else(|| Error::new("invalid_media", "结果地址无效"))?, &destination, cancel)? };
+            self.download_progress(&job.id, index as u64, count, flow::ProgressUpdate::stage("正在校验并保存作品", Some(96)));
             let mut asset = self.probe(&path, cancel)?;
             if (kind == "video" && (asset["duration"].as_f64().is_none() || asset["width"].as_u64().unwrap_or(0) == 0)) || (kind == "image" && !asset["stillImage"].as_bool().unwrap_or(false)) {
                 return Err(Error::new("invalid_media", "生成结果类型与请求不符，文件已保留供核查"));
@@ -657,7 +695,7 @@ impl Runtime {
                 }
                 let connection = self.store.lock().unwrap().connection.clone();
                 let key = self.api_key()?;
-                self.update(&job.id, "generating");
+                self.checkpoint(&job.id, "generating", Some(flow::ProgressUpdate::stage("正在提交生成请求", None)));
                 self.persist()?;
                 let count = job.params["n"].as_u64().unwrap_or(1);
                 if !(1..=4).contains(&count) || (job.params["kind"] == "video" && count != 1) {
@@ -669,15 +707,16 @@ impl Runtime {
                     if cancel.load(Ordering::SeqCst) { return Err(Error::new("cancelled", "已停止生成，已完成的素材保留")); }
                     let mut request = job.params.clone();
                     request["client_request_id"] = json!(format!("{}-{index}", job.id));
-                    let url = flow::generate(&connection, &key, &request, cancel, |message| {
-                        let mut store = self.store.lock().unwrap();
-                        store.revision = store.revision.saturating_add(1);
-                        let revision = store.revision;
-                        if let Some(current) = store.jobs.iter_mut().find(|current| current.id == job.id) { current.revision = revision; current.updated_at = creation::now(); current.stage = format!("generating: 第 {}/{} 张；{message}", index + 1, count); }
+                    self.generation_progress(&job.id, index, count, flow::ProgressUpdate::stage("等待生成服务响应", None));
+                    let url = flow::generate(&connection, &key, &request, cancel, |update| {
+                        // Reserve the last 10% of each item for local receipt/download/save.
+                        let update = flow::ProgressUpdate::stage(update.stage, update.percent.map(|value| (u16::from(value) * 90 / 100) as u8));
+                        self.generation_progress(&job.id, index, count, update);
                     })?;
+                    self.generation_progress(&job.id, index, count, flow::ProgressUpdate::stage("生成结果已返回", Some(90)));
                     urls.push(url);
                     atomic_json(&folder.join("generation-result.json"), &json!({"urls":urls,"url":urls[0],"model":job.params["model"],"connection":connection}))?;
-                    let partial = self.download_generation(job, &folder, cancel)?;
+                    let partial = self.download_generation(job, &folder, cancel, false)?;
                     {
                         let mut store = self.store.lock().unwrap();
                         store.revision = store.revision.saturating_add(1);
@@ -685,9 +724,10 @@ impl Runtime {
                         if let Some(current) = store.jobs.iter_mut().find(|current| current.id == job.id) { current.result = Some(partial); current.revision = revision; current.updated_at = creation::now(); }
                     }
                     self.persist()?;
+                    self.download_progress(&job.id, index, count, flow::ProgressUpdate::stage("本张作品已保存", Some(100)));
                 }
                 self.update(&job.id, "downloading");
-                self.download_generation(job, &folder, cancel)
+                self.download_generation(job, &folder, cancel, false)
             }
             "cutflow.bilibili.download" => {
                 self.update(&job.id, "downloading");
@@ -780,6 +820,20 @@ impl Runtime {
 }
 
 
+/// Percentages describe observed workflow stages, never elapsed-time estimates.
+/// An unknown upstream stage only exposes the count of already saved items.
+fn combined_progress(index: u64, count: u64, update: flow::ProgressUpdate) -> flow::ProgressUpdate {
+    let count = count.max(1);
+    let completed = index.min(count);
+    let percent = match update.percent {
+        Some(percent) => Some(((completed * 100 + u64::from(percent.min(100))) / count).min(99) as u8),
+        None if completed > 0 => Some((completed * 100 / count).min(99) as u8),
+        None => None,
+    };
+    flow::ProgressUpdate::stage(update.stage, percent)
+}
+
+
 // ffprobe may assign one-frame duration to the image2 demuxer (including JPEG).
 // Use the container as well as the codec so MJPEG videos remain videos.
 fn is_still_image(info: &Value, codec: &str, audio: bool, duration: Option<f64>) -> bool {
@@ -799,5 +853,71 @@ mod probe_regressions {
         let video = json!({"format":{"format_name":"avi","duration":"0.040000"}});
         assert!(!is_still_image(&video, "mjpeg", false, Some(0.04)));
         assert!(!is_still_image(&info, "mjpeg", true, Some(0.04)));
+    }
+}
+
+
+#[cfg(test)]
+mod progress_regressions {
+    use super::*;
+
+    fn runtime() -> Runtime {
+        let root = std::env::temp_dir().join(format!("cutflow-progress-{}", uuid::Uuid::new_v4()));
+        Runtime::open(root.clone(), root.join("tools")).unwrap()
+    }
+
+    #[test]
+    fn legacy_jobs_without_progress_still_load() {
+        let job: Job = serde_json::from_value(json!({
+            "id":"old","operationId":"old","method":"cutflow.generate","params":{},
+            "status":"failed","stage":"old error","result":null,"error":null
+        })).unwrap();
+        assert!(job.progress.is_none());
+        assert!(serde_json::to_value(job).unwrap().get("progress").is_none());
+    }
+
+    #[test]
+    fn stages_are_merged_across_images_and_only_saved_items_count_as_finished() {
+        let unknown = combined_progress(0, 4, flow::ProgressUpdate::stage("等待响应", None));
+        assert_eq!(unknown.percent, None);
+        assert_eq!(combined_progress(0, 4, flow::ProgressUpdate::stage("已返回", Some(90))).percent, Some(22));
+        assert_eq!(combined_progress(1, 4, flow::ProgressUpdate::stage("等待下一张", None)).percent, Some(25));
+        assert_eq!(combined_progress(1, 2, flow::ProgressUpdate::stage("正在生成", Some(50))).percent, Some(75));
+        assert_eq!(combined_progress(1, 2, flow::ProgressUpdate::stage("本张作品已保存", Some(100))).percent, Some(99));
+    }
+
+    #[test]
+    fn progress_is_persisted_monotonic_and_failure_preserves_last_stage() {
+        let runtime = runtime();
+        let (job, _, _) = runtime.reserve("cutflow.generate", json!({"operationId":"progress","model":"custom"})).unwrap();
+        runtime.generation_progress(&job.id, 0, 2, flow::ProgressUpdate::stage("正在生成", Some(80)));
+        runtime.generation_progress(&job.id, 0, 2, flow::ProgressUpdate::stage("服务心跳", None));
+        let view = runtime.dispatch("cutflow.jobs.get", json!({"jobId":job.id})).unwrap();
+        assert_eq!(view["progress"]["percent"], 40);
+        runtime.finish(&job.id, Err(Error::new("download_error", "下载失败")));
+        let view = runtime.dispatch("cutflow.jobs.get", json!({"jobId":job.id})).unwrap();
+        assert_eq!(view["status"], "failed");
+        assert_eq!(view["progress"]["percent"], 40);
+        assert_eq!(view["progress"]["stage"], "服务心跳");
+        let stored: Value = serde_json::from_slice(&std::fs::read(runtime.root.join("workbench.json")).unwrap()).unwrap();
+        assert_eq!(stored["jobs"][0]["progress"], view["progress"]);
+    }
+
+    #[test]
+    fn provider_completion_is_capped_until_local_success_and_cancel_keeps_progress() {
+        let runtime = runtime();
+        let (job, _, _) = runtime.reserve("cutflow.generate", json!({"operationId":"saved","model":"custom"})).unwrap();
+        runtime.generation_progress(&job.id, 0, 1, flow::ProgressUpdate::stage("已下载，正在校验", Some(100)));
+        let view = runtime.dispatch("cutflow.jobs.get", json!({"jobId":job.id})).unwrap();
+        assert_eq!(view["progress"]["percent"], 99);
+        runtime.finish(&job.id, Err(Error::new("cancelled", "用户停止")));
+        let view = runtime.dispatch("cutflow.jobs.get", json!({"jobId":job.id})).unwrap();
+        assert_eq!(view["status"], "cancelled");
+        assert_eq!(view["progress"]["percent"], 99);
+        runtime.finish(&job.id, Ok(json!({"assets":[]})));
+        let view = runtime.dispatch("cutflow.jobs.get", json!({"jobId":job.id})).unwrap();
+        assert_eq!(view["status"], "completed");
+        assert_eq!(view["progress"]["percent"], 100);
+        assert_eq!(view["progress"]["stage"], "作品已保存");
     }
 }

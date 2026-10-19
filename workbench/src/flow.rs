@@ -213,12 +213,89 @@ pub fn reference_data(path: &Path) -> Result<String> {
     ))
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressUpdate {
+    pub stage: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub percent: Option<u8>,
+    pub basis: String,
+}
+
+impl ProgressUpdate {
+    pub fn stage(stage: impl Into<String>, percent: Option<u8>) -> Self {
+        Self { stage: stage.into(), percent, basis: "stage".into() }
+    }
+}
+
+fn safe_progress_text(value: &Value) -> Option<String> {
+    let raw = value.as_str()?.trim();
+    if raw.is_empty() || raw.len() > 512 { return None; }
+    let lower = raw.to_ascii_lowercase();
+    // Only short status text may be persisted; media and credentials are not progress.
+    if lower.contains("data:") || lower.contains("base64") || lower.contains("bearer ") || lower.contains("sk-")
+        || lower.contains("http://") || lower.contains("https://")
+        || ["api_key", "apikey", "access_token", "authorization", "cookie", "password", "credential"].iter().any(|word| lower.contains(*word))
+        || raw.split_whitespace().any(|word| word.len() > 100 && word.bytes().all(|c| c.is_ascii_alphanumeric() || b"+/=_-".contains(&c))) {
+        return None;
+    }
+    let text: String = raw.chars().filter(|character| !character.is_control()).take(120).collect();
+    (!text.is_empty()).then_some(text)
+}
+
+fn progress_stage_text(value: &Value) -> Option<String> {
+    let stage = safe_progress_text(value)?;
+    Some(match stage.as_str() {
+        "queued" => "等待生成".into(),
+        "started" => "准备生成".into(),
+        "token_selected" => "已选择项目账号".into(),
+        "token_ready" => "项目账号已就绪".into(),
+        "project_ready" => "Flow 项目已就绪".into(),
+        "preparing_video" => "正在准备视频".into(),
+        "uploading_images" => "正在上传参考图".into(),
+        "submitting_image" => "正在提交图片生成".into(),
+        "solving_image_captcha" => "正在完成图片验证".into(),
+        "video_submitted" => "视频任务已提交".into(),
+        "video_polling" => "等待视频生成".into(),
+        "image_generated" => "图片已生成".into(),
+        "upsampling_2k" => "正在放大至 2K".into(),
+        "upsampling_4k" => "正在放大至 4K".into(),
+        "caching_image" => "正在缓存原图".into(),
+        "caching_video" => "正在缓存视频".into(),
+        "submitting" => "正在提交生成请求".into(),
+        "generating" => "正在生成".into(),
+        "upscaling" => "正在放大图片".into(),
+        "downloading" => "正在下载原图".into(),
+        "completed" => "生成结果已返回".into(),
+        _ => stage,
+    })
+}
+
+fn progress_from_value(value: &Value) -> Option<ProgressUpdate> {
+    if value.get("basis").and_then(Value::as_str) != Some("stage") { return None; }
+    let stage = progress_stage_text(value.get("stage")?)?;
+    let percent = value.get("percent").and_then(Value::as_u64)
+        .filter(|value| *value <= 100).map(|value| value as u8);
+    Some(ProgressUpdate::stage(stage, percent))
+}
+
+fn progress_from_payload(payload: &Value) -> Option<ProgressUpdate> {
+    let choice = payload["choices"].as_array().and_then(|choices| choices.first());
+    let message = choice.and_then(|choice| choice.get("delta"))
+        .or_else(|| choice.and_then(|choice| choice.get("message")));
+    payload.get("gflow_progress").and_then(progress_from_value)
+        .or_else(|| message.and_then(|message| message.get("gflow_progress")).and_then(progress_from_value))
+        .or_else(|| message.and_then(|message| message.get("reasoning_content"))
+            .and_then(|text| progress_stage_text(text).map(|stage| ProgressUpdate::stage(stage, None))))
+}
+
 #[derive(Default)]
 pub struct StreamResult {
     pub content: String,
     pub url: Option<String>,
     pub done: bool,
     pub control: Option<Value>,
+    pub progress: Option<ProgressUpdate>,
 }
 
 impl StreamResult {
@@ -233,6 +310,7 @@ impl StreamResult {
         let payload: Value = serde_json::from_str(data)
             .map_err(|_| Error::new("result_unknown", "生成服务返回无效消息，结果待核查"))?;
         if let Some(control) = payload.get("gflow_control") { self.control = Some(control.clone()); }
+        if let Some(progress) = progress_from_payload(&payload) { self.progress = Some(progress); }
         if payload.get("error").is_some() {
             return Err(Error::new(
                 match payload["error"]["code"].as_str().unwrap_or("") {
@@ -330,7 +408,7 @@ pub fn check_response(connection: &Connection, key: &str, model: &str) -> Result
 
 pub fn generate(
     connection: &Connection, key: &str, request: &Value, cancel: &AtomicBool,
-    mut progress: impl FnMut(&str),
+    mut progress: impl FnMut(ProgressUpdate),
 ) -> Result<String> {
     let model = crate::required(request, "model")?;
     let prompt = crate::required(request, "prompt")?;
@@ -406,9 +484,15 @@ pub fn generate(
                     let event = String::from_utf8_lossy(&buffer[..end]);
                     let data = event.lines().filter_map(|line| line.strip_prefix("data:").map(str::trim_start)).collect::<Vec<_>>().join("\n");
                     if !data.is_empty() {
+                        let previous_progress = result.progress.clone();
                         result.event(&data).map_err(|mut error| { error.message = error.message.replace(key, "[REDACTED_SECRET]"); error })?;
                         if result.control.is_some() { control = result.control.clone(); }
-                        progress("服务正在处理；已收到进度");
+                        if result.progress != previous_progress {
+                            if let Some(mut update) = result.progress.clone() {
+                                update.stage = update.stage.replace(key, "[REDACTED_SECRET]");
+                                progress(update);
+                            }
+                        }
                     }
                     buffer.drain(..end + separator);
                     if result.done { break; }
@@ -426,6 +510,10 @@ pub fn generate(
         } else {
             let body: Value = serde_json::from_slice(&buffer).map_err(|_| Error::new("result_unknown", "响应格式无效，结果待核查"))?;
             result.event(&body.to_string())?;
+            if let Some(mut update) = result.progress.clone() {
+                update.stage = update.stage.replace(key, "[REDACTED_SECRET]");
+                progress(update);
+            }
         }
         result.media_url()
     });
@@ -532,11 +620,12 @@ pub fn download(
             .timeout(Duration::from_secs(1800))
             .resolver(move |_netloc: &str| Ok(resolved.clone()))
             .build();
-        let response = media_agent.get(&target).call().map_err(|_| {
-            Error::new(
-                "download_error",
-                "生成结果已返回，但媒体下载失败；可核查已保存的结果地址",
-            )
+        let response = media_agent.get(&target).call().map_err(|error| {
+            let detail = match error {
+                ureq::Error::Status(status, _) => format!("HTTP {status}"),
+                _ => "连接中断或超时".into(),
+            };
+            Error::new("download_error", format!("生成已成功，但原图下载失败（{detail}）；可只重试下载，无需重新生成"))
         })?;
         if (300..400).contains(&response.status()) {
             target = parsed

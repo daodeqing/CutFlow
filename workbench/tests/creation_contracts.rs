@@ -237,6 +237,40 @@ fn instance_changes_block_old_projects_and_catalog_refresh_is_nonfatal() {
 }
 
 #[test]
+fn ready_project_capability_refresh_queries_the_bound_account_without_new_creation() {
+    let runtime = ready_runtime();
+    let response = json!({"version":1,"instanceId":"service-a","project":{
+        "id":"project-a","flowProjectId":"real-google-project","state":"ready","accountLabel":"Account A"
+    },"models":[{"id":"gflow-nano-banana-2.1","kind":"image","maxReferences":3,"imageSizes":["1K","2K"]}]});
+    let (connection, worker) = local_control(vec![Some(capability("service-a")), Some(response)], None);
+    runtime.dispatch("cutflow.connection.save", json!({"baseUrl":connection.base_url,"apiKey":"fixture"})).unwrap();
+    let cached = runtime.dispatch("cutflow.creation.projects.get", json!({"projectId":"project-a"})).unwrap();
+    assert_eq!(cached["state"], "ready");
+    let updated = runtime.dispatch("cutflow.creation.projects.get", json!({"projectId":"project-a","refresh":true})).unwrap();
+    assert_eq!(updated["models"][0]["imageSizes"], json!(["1K","2K"]));
+    assert_eq!(updated["flowProjectId"], "real-google-project");
+    let requests = worker.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0]["op"], "capabilities");
+    assert_eq!(requests[1]["op"], "projects.get");
+    assert_eq!(requests[1]["flowProjectId"], "real-google-project");
+    assert!(runtime.store.lock().unwrap().jobs.is_empty());
+    assert!(protocol::tools().to_string().contains("refresh"));
+}
+
+#[test]
+fn ready_project_refresh_failure_keeps_the_existing_binding_and_capabilities() {
+    let runtime = ready_runtime();
+    let (connection, worker) = local_control(vec![Some(capability("service-a")), None], None);
+    runtime.dispatch("cutflow.connection.save", json!({"baseUrl":connection.base_url,"apiKey":"fixture"})).unwrap();
+    assert!(runtime.dispatch("cutflow.creation.projects.get", json!({"projectId":"project-a","refresh":true})).is_err());
+    let existing = runtime.dispatch("cutflow.creation.projects.get", json!({"projectId":"project-a"})).unwrap();
+    assert_eq!(existing["state"], "ready");
+    assert_eq!(existing["flowProjectId"], "real-google-project");
+    assert_eq!(worker.join().unwrap()[1]["op"], "projects.get");
+}
+
+#[test]
 fn projects_and_turns_page_large_histories_without_catalog_payload_growth() {
     let runtime=ready_runtime();
     {

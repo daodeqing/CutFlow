@@ -576,3 +576,108 @@ fn download_retry_requires_an_unsaved_captured_media_result() {
     assert_eq!(runtime.snapshot()["jobs"][0]["canRetryDownload"], false);
     assert!(runtime.dispatch("cutflow.jobs.retryDownload", json!({"jobId":job.id})).is_err());
 }
+
+
+#[test]
+fn structured_stage_progress_is_safe_and_kept_separate_from_media() {
+    let mut stream = StreamResult::default();
+    stream.event(&json!({"gflow_progress":{"stage":"generating","percent":43,"basis":"stage"}}).to_string()).unwrap();
+    let progress = stream.progress.clone().unwrap();
+    assert_eq!(progress.stage, "正在生成");
+    assert_eq!(progress.percent, Some(43));
+    assert_eq!(progress.basis, "stage");
+    assert!(stream.content.is_empty());
+    assert!(stream.url.is_none());
+    stream.event(&json!({"choices":[{"delta":{"gflow_progress":{"stage":"upsampling_4k","percent":82,"basis":"stage"}}}]}).to_string()).unwrap();
+    assert_eq!(stream.progress.as_ref().unwrap().stage, "正在放大至 4K");
+    assert_eq!(stream.progress.as_ref().unwrap().percent, Some(82));
+
+    // Unknown/out-of-range progress cannot become a fake numerical percentage.
+    stream.event(&json!({"gflow_progress":{"stage":"准备放大","percent":101,"basis":"stage"}}).to_string()).unwrap();
+    assert_eq!(stream.progress.as_ref().unwrap().percent, None);
+    let previous = stream.progress.clone();
+    for text in ["https://cdn.example/image.png?token=secret", "data:image/png;base64,aGVsbG8=", "Authorization: Bearer secret", "api_key=secret"] {
+        stream.event(&json!({"gflow_progress":{"stage":text,"percent":99,"basis":"stage"}}).to_string()).unwrap();
+        assert_eq!(stream.progress, previous);
+    }
+    stream.event(&json!({"gflow_progress":{"stage":"fake","percent":99,"basis":"elapsed"}}).to_string()).unwrap();
+    assert_eq!(stream.progress, previous);
+}
+
+#[test]
+fn generation_callback_only_receives_sanitized_stage_progress() {
+    let events = [
+        json!({"choices":[{"delta":{"reasoning_content":"正在生成图片"}}]}),
+        json!({"choices":[{"delta":{"reasoning_content":"https://cdn.example/image.png?token=secret"}}]}),
+        json!({"gflow_progress":{"stage":"准备放大 fixture-key","percent":72,"basis":"stage"}}),
+        json!({"choices":[{"delta":{"content":"![result](https://cdn.example/image.png)"}}]}),
+    ];
+    let body = events.iter().map(|event| format!("data: {event}\n\n")).collect::<String>() + "data: [DONE]\n\n";
+    let (connection, worker) = mock(200, "text/event-stream", body);
+    let mut progress = Vec::new();
+    let result = flow::generate(&connection, "fixture-key", &json!({"model":"custom","prompt":"test"}), &AtomicBool::new(false), |update| progress.push(update)).unwrap();
+    assert_eq!(result, "https://cdn.example/image.png");
+    assert_eq!(progress.len(), 2);
+    assert_eq!(progress[0].stage, "正在生成图片");
+    assert_eq!(progress[0].percent, None);
+    assert_eq!(progress[1].percent, Some(72));
+    assert_eq!(progress[1].stage, "准备放大 [REDACTED_SECRET]");
+    assert!(progress.iter().all(|update| !update.stage.contains("https://") && !update.stage.contains("fixture-key")));
+    worker.join().unwrap();
+}
+
+#[test]
+fn a_stream_failure_does_not_erase_the_last_observed_stage() {
+    let body = format!("data: {}\n\ndata: {}\n\n",
+        json!({"gflow_progress":{"stage":"正在生成","percent":61,"basis":"stage"}}),
+        json!({"error":{"message":"provider unavailable"}}));
+    let (connection, worker) = mock(200, "text/event-stream", body);
+    let mut progress = Vec::new();
+    let error = flow::generate(&connection, "fixture", &json!({"model":"custom","prompt":"test"}), &AtomicBool::new(false), |update| progress.push(update)).unwrap_err();
+    assert_eq!(error.code, "provider_error");
+    assert_eq!(progress.len(), 1);
+    assert_eq!(progress[0].percent, Some(61));
+    worker.join().unwrap();
+}
+
+#[test]
+fn media_download_errors_preserve_http_status_and_offer_download_only_retry() {
+    let root = scratch();
+    let (connection, worker) = mock(403, "application/json", "{}".into());
+    let error = flow::download(&connection, &connection.base_url.replace("/v1", "/image.png"), &root.join("image.png"), &AtomicBool::new(false)).unwrap_err();
+    assert_eq!(error.code, "download_error");
+    assert!(error.message.contains("HTTP 403"));
+    assert!(error.message.contains("只重试下载"));
+    assert!(!error.message.contains("http://"));
+    worker.join().unwrap();
+}
+
+
+#[test]
+fn download_only_retry_uses_receipt_and_keeps_download_stage_on_failure() {
+    let root = scratch();
+    let runtime = Runtime::open(root.clone(), root.join("tools")).unwrap();
+    let (connection, worker) = mock(403, "application/json", "{}".into());
+    let (job, _, _) = runtime.reserve("cutflow.generate", json!({
+        "operationId":"download-only","kind":"image","model":"custom","n":2
+    })).unwrap();
+    let folder = root.join("generated").join(&job.id);
+    std::fs::create_dir_all(&folder).unwrap();
+    let receipt = json!({"urls":[connection.base_url.replace("/v1", "/image.png")],"connection":connection});
+    cutflow_workbench::atomic_json(&folder.join("generation-result.json"), &receipt).unwrap();
+    runtime.finish(&job.id, Err(cutflow_workbench::Error::new("download_error", "原图下载失败")));
+    runtime.dispatch("cutflow.jobs.retryDownload", json!({"jobId":job.id})).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let view = loop {
+        let view = runtime.dispatch("cutflow.jobs.get", json!({"jobId":job.id})).unwrap();
+        if view["status"] != "running" { break view; }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert_eq!(view["status"], "failed");
+    assert_eq!(view["progress"]["stage"], "只重试下载已有结果");
+    assert_eq!(view["progress"]["percent"], 92);
+    assert!(view["error"]["message"].as_str().unwrap().contains("HTTP 403"));
+    assert!(view["canRetryDownload"].as_bool().unwrap());
+    assert!(worker.join().unwrap().starts_with("GET /image.png "));
+}

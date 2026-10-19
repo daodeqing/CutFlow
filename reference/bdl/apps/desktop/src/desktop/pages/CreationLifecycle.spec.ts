@@ -17,6 +17,10 @@ const global = {
   stubs: {
     UiButton: { template: '<button :disabled="$attrs.disabled" :type="$attrs.type || \'button\'"><slot /></button>' },
     UiDialog: { props: ['modelValue'], template: '<div v-if="modelValue" role="dialog"><slot /><slot name="footer" /></div>' },
+    UPopover: {
+      props: ['open', 'portal', 'content'], emits: ['update:open'],
+      template: '<div class="popover-fixture" :data-portal="portal"><div @click="$emit(\'update:open\', !open)"><slot /></div><div v-if="open" data-popover-content><slot name="content" /></div></div>',
+    },
     UIcon: true,
   },
 }
@@ -70,6 +74,7 @@ function install(state: Fixture) {
     switch (input.method) {
       case 'cutflow.creation.catalog': return clone(state.catalog)
       case 'cutflow.creation.projects.list': return { projects: clone(state.projects), nextCursor: null }
+      case 'cutflow.creation.projects.get': return clone(state.projects.find(item => item.id === p.projectId))
       case 'cutflow.creation.sessions.list': return { sessions: clone(state.sessions.filter(item => item.projectId === p.projectId)), nextCursor: null }
       case 'cutflow.creation.turns.list': return { turns: clone(state.turns[String(p.sessionId)] || []), nextCursor: null }
       case 'cutflow.creation.drafts.save': {
@@ -159,13 +164,13 @@ describe('CutFlow project creation lifecycle', () => {
     await submit(wrapper)
     expect(calls('cutflow.jobs.cancel')).toHaveLength(1)
     expect(calls('cutflow.generate')).toHaveLength(0)
-    expect(wrapper.get('.turn-assets img').attributes('src')).toBe('D:/partial-thumb.jpg')
-    expect(wrapper.find('.turn-assets img[src="D:/partial.jpg"]').exists()).toBe(false)
+    expect(wrapper.get('.turn-assets img').attributes('src')).toBe('D:/partial.jpg')
+    expect(wrapper.get('.turn-assets img').attributes('loading')).toBe('lazy')
     state.jobs[0].status = 'cancelled'; state.revision++
     await tick()
     expect(wrapper.text()).not.toContain('正在停止…')
     expect(wrapper.get('.creation-turn').attributes('data-status')).toBe('cancelled')
-    expect(wrapper.get('.turn-assets img').attributes('src')).toBe('D:/partial-thumb.jpg')
+    expect(wrapper.get('.turn-assets img').attributes('src')).toBe('D:/partial.jpg')
   })
 
   it('retains independent image and video drafts and cannot bypass a running image by switching kind', async () => {
@@ -322,16 +327,72 @@ describe('CutFlow project creation lifecycle', () => {
     expect(submitted.creationProjectId).toBe('project-a')
   })
 
-  it('does not load original image bytes until the user opens the original viewer', async () => {
+  it('shows lazy original image bytes directly in visible cards while keeping reference thumbnails', async () => {
     const state = fixture()
     const saved = { ...job('completed'), result: { assets: [{ path: 'D:/4k-original.png', thumbnail: 'D:/240px-thumb.jpg' }] } }
     state.jobs = [saved]; state.turns['session-a'] = [asTurn(saved)]
     install(state)
     const wrapper = view(); await flushPromises()
-    expect(wrapper.findAll('img').some(image => image.attributes('src') === 'D:/4k-original.png')).toBe(false)
-    expect(wrapper.get('.turn-assets img').attributes('src')).toBe('D:/240px-thumb.jpg')
+    expect(wrapper.get('.turn-assets img').attributes('src')).toBe('D:/4k-original.png')
+    expect(wrapper.get('.turn-assets img').attributes('loading')).toBe('lazy')
+    expect(wrapper.get('.turn-assets img').attributes('decoding')).toBe('async')
+    expect(wrapper.get('.composer-reference img').attributes('src')).toBe('D:/240px-thumb.jpg')
     await wrapper.get('.asset-preview').trigger('click'); await flushPromises()
     expect(wrapper.get('.original-image').attributes('src')).toBe('D:/4k-original.png')
+  })
+
+  it('keeps video cards on thumbnails instead of loading the video into an image', async () => {
+    const state = fixture()
+    const saved = { ...job('completed'), params: { ...job('completed').params, kind: 'video' }, result: { assets: [{ path: 'D:/movie.mp4', thumbnail: 'D:/movie-thumb.jpg' }] } }
+    state.jobs = [saved]; state.turns['session-a'] = [asTurn(saved)]
+    install(state)
+    const wrapper = view(); await flushPromises()
+    expect(wrapper.get('.turn-assets img').attributes('src')).toBe('D:/movie-thumb.jpg')
+  })
+
+  it('starts with a collapsed model popover, closes on selection, and supports Escape', async () => {
+    const state = fixture()
+    state.catalog.models.push(model('gflow-nano-banana-pro'))
+    install(state)
+    const wrapper = view(); await flushPromises()
+    const trigger = wrapper.get('[aria-label="选择生成模型"]')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('.creation-model-popover').exists()).toBe(false)
+    expect(wrapper.find('details.model-picker').exists()).toBe(false)
+    await trigger.trigger('click')
+    expect(wrapper.get('.popover-fixture').attributes('data-portal')).toBe('true')
+    expect(wrapper.find('.creation-model-popover').exists()).toBe(true)
+    await wrapper.findAll('.model-options button').find(button => button.text().includes('Nano Banana Pro'))!.trigger('click')
+    expect(useCreationStore().draft.model).toBe('gflow-nano-banana-pro')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    await trigger.trigger('click')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('.creation-model-popover').exists()).toBe(false)
+  })
+
+  it('always shows all quality choices but enables only confirmed project model capabilities and refreshes them', async () => {
+    const state = fixture()
+    state.projects[0].models = [{ ...model(), imageSizes: ['1K', '2K'] }]
+    install(state)
+    const wrapper = view(); await flushPromises()
+    const quality = wrapper.get('#ai-image-size')
+    expect(quality.findAll('option').map(option => option.attributes('value'))).toEqual(['auto', '1K', '2K', '4K'])
+    expect(quality.get('option[value="4K"]').attributes('disabled')).toBeDefined()
+    expect(quality.get('option[value="2K"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('模型 / 账号 / 服务未开放')
+    state.projects[0].models[0].imageSizes = ['1K', '2K', '4K']
+    await useCreationStore().loadCatalog(true); await flushPromises()
+    expect(calls('cutflow.creation.projects.get').at(-1)?.[1].params).toEqual({ projectId: 'project-a', refresh: true })
+    expect(quality.get('option[value="4K"]').attributes('disabled')).toBeUndefined()
+    await quality.setValue('4K')
+    state.projects[0].models[0].imageSizes = []
+    await useCreationStore().loadCatalog(true); await flushPromises()
+    expect(useCreationStore().draft.imageSize).toBe('auto')
+    expect(quality.get('option[value="1K"]').attributes('disabled')).toBeDefined()
+    expect(quality.get('option[value="4K"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('确认前仅可使用默认画质')
   })
 
   it('preserves the confirmed import project and refuses additions during import without navigation', () => {

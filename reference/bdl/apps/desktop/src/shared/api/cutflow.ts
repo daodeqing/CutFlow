@@ -23,6 +23,11 @@ export interface Asset {
   hasAudio?: boolean;
   thumbnail?: string;
 }
+export interface GenerationProgress {
+  stage: string;
+  percent?: number;
+  basis: 'stage';
+}
 export interface Job {
   id: string;
   operationId: string;
@@ -30,6 +35,7 @@ export interface Job {
   params: Record<string, unknown>;
   status: string;
   stage: string;
+  progress?: GenerationProgress;
   revision?: number;
   createdAt?: number;
   updatedAt?: number;

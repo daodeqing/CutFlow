@@ -156,13 +156,31 @@ describe('project creation store consistency', () => {
     const store = seeded()
     store.draft.model = 'gflow-nano-banana-2.1'; store.draft.modelSource = 'catalog'
     const response = deferred<CreationCatalog>()
-    invoke.mockReturnValue(response.promise)
+    invoke.mockImplementation((_cmd, input) => input.method === 'cutflow.creation.catalog'
+      ? response.promise : Promise.resolve(project()))
     const a = store.loadCatalog(true), b = store.loadCatalog(true)
     expect(invoke).toHaveBeenCalledTimes(1)
     response.resolve({ ...catalog(), models: [] })
     await Promise.all([a, b])
     expect(store.draft.model).toBe('gflow-nano-banana-2.1')
     expect(store.catalog.models).toEqual([])
+  })
+
+  it('refreshes the bound project capabilities without moving a later project selection', async () => {
+    const store = seeded()
+    store.projects[0].models = [{ ...model('gflow-nano-banana-2-lite'), imageSizes: ['1K'] }]
+    const projectReceipt = deferred<CreationProject>()
+    invoke.mockImplementation((_cmd, input) => input.method === 'cutflow.creation.catalog'
+      ? Promise.resolve(catalog()) : projectReceipt.promise)
+    const refreshing = store.loadCatalog(true)
+    await Promise.resolve(); await Promise.resolve()
+    expect(invoke.mock.calls.at(-1)?.[1]).toEqual({ method: 'cutflow.creation.projects.get', params: { projectId: 'p-a', refresh: true } })
+    await store.selectSession(store.sessions['p-b'][0])
+    projectReceipt.resolve({ ...project(), models: [{ ...model('gflow-nano-banana-2-lite'), imageSizes: ['1K', '2K', '4K'] }] })
+    await refreshing
+    expect(store.activeProjectId).toBe('p-b')
+    expect(store.activeSessionId).toBe('s-b')
+    expect(store.projects.find(item => item.id === 'p-a')?.models?.[0].imageSizes).toEqual(['1K', '2K', '4K'])
   })
 
   it('chooses a default only from the fixed project account capability list', () => {

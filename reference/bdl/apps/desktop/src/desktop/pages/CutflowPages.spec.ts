@@ -14,6 +14,10 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 const global = { stubs: {
   UiButton: { template: '<button :disabled="$attrs.disabled" :type="$attrs.type || \'button\'"><slot /></button>' },
   UiDialog: { props: ['modelValue'], template: '<div v-if="modelValue" role="dialog"><slot /><slot name="footer" /></div>' },
+  UPopover: {
+    props: ['open'], emits: ['update:open'],
+    template: '<div><div @click="$emit(\'update:open\', !open)"><slot /></div><div v-if="open"><slot name="content" /></div></div>',
+  },
   UiTabs: true,
   UIcon: true,
 } }
@@ -92,7 +96,8 @@ describe('CutFlow workspaces', () => {
     expect(invoke.mock.calls.some(([, input]) => input.method === 'cutflow.creation.projects.create')).toBe(true)
     expect(invoke.mock.calls.some(([, input]) => input.method === 'cutflow.creation.sessions.create')).toBe(true)
     expect(wrapper.find('.custom-model').exists()).toBe(false)
-    expect(wrapper.find('.model-picker').attributes('open')).toBeUndefined()
+    expect(wrapper.get('.model-summary').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('.model-options').exists()).toBe(false)
     await wrapper.get('.model-summary').trigger('click')
     expect(wrapper.get('.model-options').text()).not.toContain('gflow-')
     await wrapper.get('.model-options button').trigger('click')
@@ -110,6 +115,7 @@ describe('CutFlow workspaces', () => {
     const state = workspaceFixture(); state.models = [aiModel('gflow-nano-banana-2.1')]
     mockCreation(state)
     const wrapper = creationView(); await flushPromises()
+    await wrapper.get('.model-summary').trigger('click')
     await wrapper.get('.model-options').trigger('wheel', { deltaY: 150 })
     expect(wrapper.find('.model-options').exists()).toBe(true)
     await wrapper.get('.model-options button').trigger('click')
@@ -135,6 +141,7 @@ describe('CutFlow workspaces', () => {
     state.rejectGeneration = true
     mockCreation(state)
     const wrapper = creationView(); await flushPromises()
+    await wrapper.get('.model-summary').trigger('click')
     expect(wrapper.get('.model-options button[aria-pressed="true"]').text()).toContain('Nano Banana 2 Lite')
     const choices = wrapper.findAll('.model-options button strong').map(item => item.text())
     expect(choices).toEqual(['Nano Banana 2.1', 'Nano Banana 2 Lite'])
@@ -144,6 +151,7 @@ describe('CutFlow workspaces', () => {
     await wrapper.get('form.conversation-composer').trigger('submit'); await flushPromises()
     expect(generationCalls()).toHaveLength(1)
     expect(wrapper.text()).toContain('provider rejected')
+    await wrapper.get('.model-summary').trigger('click')
     expect(wrapper.get('.model-options button[aria-pressed="true"]').text()).toContain('Nano Banana 2.1')
     expect(generationCalls()[0][1].params.model).toBe('gflow-nano-banana-2.1')
     wrapper.unmount()

@@ -148,7 +148,7 @@ pub fn tools() -> Value {
             "cutflow.creation.catalog"=>"refresh",
             "cutflow.creation.projects.list"=>"cursor limit",
             "cutflow.creation.projects.create"=>"name preferredModel operationId",
-            "cutflow.creation.projects.get"=>"projectId",
+            "cutflow.creation.projects.get"=>"projectId refresh",
             "cutflow.creation.sessions.list"=>"projectId cursor limit",
             "cutflow.creation.sessions.create"=>"projectId title operationId",
             "cutflow.creation.turns.list"=>"sessionId cursor limit",

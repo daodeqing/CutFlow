@@ -3,6 +3,7 @@ import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted,
 import { open } from '@tauri-apps/plugin-dialog';
 import UiButton from '../../shared/ui/Button.vue';
 import UiDialog from '../../shared/ui/Dialog.vue';
+import UiGenerationProgress from '../../shared/ui/GenerationProgress.vue';
 import {
   cutflow,
   errorMessage,
@@ -131,9 +132,12 @@ const aspectOptions = computed(() =>
       ? ['1:1', '16:9', '9:16', '4:3', '3:4']
       : ['16:9', '9:16'],
 );
-const sizeOptions = computed(
-  () =>
-    capability.value?.imageSizes || (capability.value?.id.startsWith('gflow-nano-banana-') ? ['1K', '2K', '4K'] : []),
+const imageSizes = ['1K', '2K', '4K'];
+const sizeOptions = computed(() => capability.value?.imageSizes || []);
+const sizeAvailability = computed(() =>
+  sizeOptions.value.length
+    ? '当前模型 / 账号 / 服务未开放的分辨率已禁用。2K / 4K 可能包含放大处理，实际尺寸以结果为准。'
+    : '当前服务未返回此模型的分辨率能力，请刷新模型与能力；确认前仅可使用默认画质。',
 );
 const durationOptions = computed(
   () => capability.value?.durations || (draft.value.model.includes('omni') ? [4, 6, 8, 10] : [4, 6, 8]),
@@ -202,8 +206,8 @@ const isRunning = (job: Job) => ['running', 'queued'].includes(job.status);
 const isStopping = (job: Job) => creation.stoppingIds.includes(job.id);
 const timeLabel = (value: number) =>
   new Date(value).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-const thumb = (turn: CreationTurn, asset: Asset, index: number) =>
-  asset.thumbnail || (index === 0 ? turn.job.result?.thumbnail : '');
+const previewSource = (turn: CreationTurn, asset: Asset, index: number) =>
+  turn.params.kind === 'image' ? asset.path : asset.thumbnail || (index === 0 ? turn.job.result?.thumbnail : '');
 const assetSelected = (asset: Asset) => automaticReference.value?.path === asset.path;
 const ratioMismatch = (turn: CreationTurn, asset: Asset) => {
   if (turn.params.kind !== 'image' || !asset.width || !asset.height) return false;
@@ -544,6 +548,7 @@ async function activate() {
   return starting;
 }
 function deactivate() {
+  modelExpanded.value = false;
   live = false;
   restoringViewport = false;
   clearTimeout(timer);
@@ -552,7 +557,12 @@ function deactivate() {
   void creation.saveDraft().catch(() => undefined);
 }
 function escapePanel(event: KeyboardEvent) {
-  if (event.key === 'Escape') panels.value = null;
+  if (event.key !== 'Escape') return;
+  if (modelExpanded.value) {
+    modelExpanded.value = false;
+    return;
+  }
+  panels.value = null;
 }
 function visibility() {
   clearTimeout(timer);
@@ -565,7 +575,7 @@ function visibility() {
     .finally(schedulePoll);
 }
 watch(
-  () => [creation.kind, draft.value.model],
+  () => [creation.kind, draft.value.model, sizeOptions.value.join('|')],
   () => {
     creation.defaultModel();
     if (!aspectOptions.value.includes(draft.value.aspect) && draft.value.aspect !== 'auto') draft.value.aspect = 'auto';
@@ -819,13 +829,13 @@ onUnmounted(() => {
                   @click="turn.params.kind === 'image' ? (originalAsset = asset) : openFile(asset.path)"
                 >
                   <img
-                    v-if="thumb(turn, asset, index)"
-                    :src="mediaSource(thumb(turn, asset, index)!)"
-                    :alt="turn.prompt + ' · 预览图'"
+                    v-if="previewSource(turn, asset, index)"
+                    :src="mediaSource(previewSource(turn, asset, index)!)"
+                    :alt="turn.prompt + (turn.params.kind === 'image' ? ' · 原图' : ' · 视频预览')"
                     loading="lazy"
                     decoding="async"
-                    width="720"
-                    height="480"
+                    :width="asset.width || 720"
+                    :height="asset.height || 480"
                   />
                   <span v-else class="asset-placeholder"
                     ><UIcon
@@ -858,12 +868,12 @@ onUnmounted(() => {
                 </div>
               </figure>
             </div>
-            <p v-if="isRunning(turn.job)" class="generation-progress" role="status">
-              <span class="generation-pulse"></span>{{ turn.job.stage
-              }}<button :disabled="isStopping(turn.job)" @click="stopJob(turn.job)">
-                {{ isStopping(turn.job) ? '正在停止…' : '停止生成' }}
-              </button>
-            </p>
+            <UiGenerationProgress
+              v-if="isRunning(turn.job)"
+              :job="turn.job"
+              :stopping="isStopping(turn.job)"
+              @stop="stopJob(turn.job)"
+            />
             <p v-else-if="turn.job.error" class="turn-error">{{ turn.job.error.message }}</p>
             <button
               v-if="turn.job.canRetryDownload"
@@ -974,38 +984,51 @@ onUnmounted(() => {
             </button>
           </div>
         </section>
-        <details class="model-section model-picker" :open="modelExpanded" @toggle="modelExpanded = ($event.target as HTMLDetailsElement).open">
-          <summary class="model-summary">
-            <span><label for="ai-model-search">模型</label><strong>{{ modelName(draft.model) }}</strong></span>
-            <UIcon :name="modelExpanded ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'" aria-hidden="true" />
-          </summary>
-          <div class="parameter-search">
-            <UIcon name="i-tabler-search" aria-hidden="true" /><input
-              id="ai-model-search"
-              v-model="modelSearch"
-              placeholder="搜索模型"
-            />
-          </div>
-          <div class="model-options">
-            <button
-              v-for="model in models"
-              :key="model.id"
-              type="button"
-              :aria-pressed="draft.model === model.id"
-              @click="
-                draft.model = model.id;
-                draft.modelSource = 'catalog';
-              "
-            >
-              <span
-                ><strong>{{ modelName(model.id) }}</strong
-                ><small>{{ modelDescription(model) }}</small></span
-              ><UIcon v-if="draft.model === model.id" name="i-tabler-check" aria-hidden="true" />
+        <section class="model-section model-picker">
+          <UPopover
+            v-model:open="modelExpanded"
+            :portal="true"
+            :content="{ align: 'end', side: 'bottom', sideOffset: 6, collisionPadding: 12 }"
+            :ui="{ content: 'creation-model-popover-layer' }"
+          >
+            <button type="button" class="model-summary" aria-label="选择生成模型" :aria-expanded="modelExpanded">
+              <span><span class="model-label">模型</span><strong>{{ modelName(draft.model) }}</strong></span>
+              <UIcon :name="modelExpanded ? 'i-tabler-chevron-up' : 'i-tabler-chevron-down'" aria-hidden="true" />
             </button>
-          </div>
-          <p v-if="!models.length" class="studio-muted">还没有可用模型，请检查连接。</p>
-          <button class="studio-link" @click="creation.loadCatalog(true)">刷新模型与能力</button>
-        </details>
+            <template #content>
+              <section class="creation-model-popover" aria-label="可用生成模型">
+                <div class="parameter-search">
+                  <UIcon name="i-tabler-search" aria-hidden="true" /><input
+                    id="ai-model-search"
+                    v-model="modelSearch"
+                    aria-label="搜索模型"
+                    placeholder="搜索模型"
+                  />
+                </div>
+                <div class="model-options">
+                  <button
+                    v-for="model in models"
+                    :key="model.id"
+                    type="button"
+                    :aria-pressed="draft.model === model.id"
+                    @click="
+                      draft.model = model.id;
+                      draft.modelSource = 'catalog';
+                      modelExpanded = false;
+                    "
+                  >
+                    <span
+                      ><strong>{{ modelName(model.id) }}</strong
+                      ><small>{{ modelDescription(model) }}</small></span
+                    ><UIcon v-if="draft.model === model.id" name="i-tabler-check" aria-hidden="true" />
+                  </button>
+                </div>
+                <p v-if="!models.length" class="studio-muted">还没有可用模型，请检查连接。</p>
+                <button class="studio-link" @click="creation.loadCatalog(true)">刷新模型与能力</button>
+              </section>
+            </template>
+          </UPopover>
+        </section>
         <section>
           <label for="ai-aspect">画面尺寸 / 比例</label
           ><select id="ai-aspect" v-model="draft.aspect">
@@ -1021,9 +1044,11 @@ onUnmounted(() => {
             <label for="ai-image-size">画质 / 分辨率</label
             ><select id="ai-image-size" v-model="draft.imageSize">
               <option value="auto">默认画质</option>
-              <option v-for="size in sizeOptions" :key="size" :value="size">{{ size }}</option>
+              <option v-for="size in imageSizes" :key="size" :value="size" :disabled="!sizeOptions.includes(size)">
+                {{ size }}{{ sizeOptions.includes(size) ? '' : '（当前不可用）' }}
+              </option>
             </select>
-            <p class="studio-muted">2K / 4K 可能包含放大处理，实际尺寸以结果为准。</p>
+            <p class="studio-muted">{{ sizeAvailability }}</p>
           </section>
           <section>
             <label for="ai-count">生成数量</label

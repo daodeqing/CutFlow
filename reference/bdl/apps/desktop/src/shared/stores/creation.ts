@@ -120,6 +120,7 @@ export const useCreationStore = defineStore('creation', () => {
       try {
         const response = await cutflow<CreationCatalog>('cutflow.creation.catalog', { refresh });
         catalog.value = response;
+        if (refresh) await refreshProjectCapabilities();
         defaultModel();
       } catch (reason) {
         error.value = String((reason as Error).message || reason);
@@ -128,6 +129,12 @@ export const useCreationStore = defineStore('creation', () => {
       catalogFlight = undefined;
     });
     return catalogFlight;
+  }
+  async function refreshProjectCapabilities() {
+    const requested = project.value;
+    if (!requested || requested.state !== 'ready') return;
+    const item = await cutflow<CreationProject>('cutflow.creation.projects.get', { projectId: requested.id, refresh: true });
+    projects.value = merge(projects.value, [item]);
   }
   async function loadProjects(more = false) {
     const response = await cutflow<{ projects: CreationProject[]; nextCursor?: string }>(

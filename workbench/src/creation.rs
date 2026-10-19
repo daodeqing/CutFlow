@@ -188,8 +188,9 @@ impl Runtime {
                 let id = required(&params, "projectId")?;
                 let project = self.store.lock().unwrap().projects.iter().find(|p| p.id == id).cloned()
                     .ok_or_else(|| Error::new("not_found", "项目不存在"))?;
-                if matches!(project.state.as_str(), "creating" | "creation_unknown") {
-                    self.reconcile_creation_project(&project)
+                if matches!(project.state.as_str(), "creating" | "creation_unknown")
+                    || (project.state == "ready" && params["refresh"].as_bool().unwrap_or(false)) {
+                    self.query_creation_project(&project, params["refresh"].as_bool().unwrap_or(false))
                 } else { Ok(json!(project)) }
             }
             "cutflow.creation.sessions.list" => {
@@ -317,11 +318,15 @@ impl Runtime {
     }
 
     fn reconcile_creation_project(&self, project: &CreationProject) -> Result<Value> {
+        self.query_creation_project(project, false)
+    }
+
+    fn query_creation_project(&self, project: &CreationProject, refresh: bool) -> Result<Value> {
         let _gate = self.project_creation_gate.lock().unwrap();
         // A simultaneous create may have completed while this reader waited.
         let current = self.store.lock().unwrap().projects.iter().find(|p| p.id == project.id).cloned()
             .ok_or_else(|| Error::new("not_found", "项目不存在"))?;
-        if current.state == "ready" { return Ok(json!(current)); }
+        if current.state == "ready" && !refresh { return Ok(json!(current)); }
         let project = &current;
         self.refresh_project_binding()?;
         let (connection, workspace_id, instance) = {
@@ -331,6 +336,10 @@ impl Runtime {
         if instance != project.instance_id { return Err(Error::new("service_instance_changed", "AI 服务实例已变化，禁止查询或重建旧绑定")); }
         let response = self.api_key().and_then(|key| flow::project_control(&connection, &key,
             &json!({"version":1,"op":"projects.get","workspaceId":workspace_id,"operationId":project.operation_id,"projectId":project.id,"flowProjectId":project.flow_project_id})));
+        // A read-only capability refresh must not erase a working binding on a transient error.
+        if refresh && project.state == "ready" {
+            if let Err(error) = &response { return Err(error.clone()); }
+        }
         self.apply_project_response(project, response)
     }
 
