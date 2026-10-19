@@ -39,7 +39,7 @@ const samples = [
   <UiDialog
     v-model="open"
     title="Wabi 液体玻璃方案与样例图"
-    description="Graphite Slate & Emerald Teal · CutFlow 0.6.4"
+    description="Graphite Slate & Emerald Teal · CutFlow 0.6.5"
     size="wide"
   >
     <div v-if="open" class="wabi-spec">
