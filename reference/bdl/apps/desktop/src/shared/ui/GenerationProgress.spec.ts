@@ -28,6 +28,15 @@ describe('creation stage progress', () => {
     expect(wrapper.find('.generation-indeterminate').exists()).toBe(true);
   });
 
+  it('labels existing-result downloads without suggesting another generation', () => {
+    const downloading = { ...job({ stage: '只重试下载已有结果', basis: 'stage' }), stage: 'downloading' }
+    const wrapper = mount(GenerationProgress, { props: { job: downloading } })
+    expect(wrapper.get('button').text()).toBe('停止下载')
+    expect(wrapper.get('[role="progressbar"]').attributes('aria-label')).toBe('作品下载中，尚未返回百分比')
+    expect(wrapper.text()).toContain('正在保存已有结果')
+    expect(wrapper.text()).not.toContain('停止生成')
+  })
+
   it('requests stop once and disables the control while stopping', async () => {
     const wrapper = mount(GenerationProgress, { props: { job: job({ stage: '正在生成', percent: 48, basis: 'stage' }) } });
     await wrapper.get('button').trigger('click');

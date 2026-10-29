@@ -6,6 +6,7 @@ import UiProgressBar from './ProgressBar.vue';
 const { job, stopping = false } = defineProps<{ job: Job; stopping?: boolean }>();
 defineEmits<{ stop: [] }>();
 
+const downloading = computed(() => /^downloading(?::|$)/.test(job.stage));
 const percent = computed(() => {
   const value = job.progress?.percent;
   if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
@@ -29,19 +30,19 @@ const stage = computed(() => {
       <strong v-if="percent !== undefined" class="generation-percent">阶段进度 {{ percent }}%</strong>
       <span v-else class="generation-indeterminate-label">等待进度</span>
       <button type="button" :disabled="stopping" @click="$emit('stop')">
-        {{ stopping ? '正在停止…' : '停止生成' }}
+        {{ stopping ? '正在停止…' : downloading ? '停止下载' : '停止生成' }}
       </button>
     </div>
     <UiProgressBar
       v-if="percent !== undefined"
       :value="percent"
       :status="stopping ? 'paused' : 'downloading'"
-      label="作品生成阶段进度"
+      :label="downloading ? '作品下载阶段进度' : '作品生成阶段进度'"
     />
-    <div v-else class="generation-indeterminate" role="progressbar" aria-label="作品生成中，服务尚未返回百分比">
+    <div v-else class="generation-indeterminate" role="progressbar" :aria-label="downloading ? '作品下载中，尚未返回百分比' : '作品生成中，服务尚未返回百分比'">
       <span></span>
     </div>
-    <small>按生成、放大与保存等阶段更新，阶段耗时不相等。</small>
+    <small>{{ downloading ? '正在保存已有结果，不会重新生成或重复计费。' : '按生成、放大与保存等阶段更新，阶段耗时不相等。' }}</small>
   </div>
 </template>
 

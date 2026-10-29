@@ -261,12 +261,22 @@ fn ready_project_capability_refresh_queries_the_bound_account_without_new_creati
 #[test]
 fn ready_project_refresh_failure_keeps_the_existing_binding_and_capabilities() {
     let runtime = ready_runtime();
+    {
+        let mut store = runtime.store.lock().unwrap();
+        let mut model = flow::describe("gflow-veo-3.1-fast", "");
+        flow::apply_model_metadata(&mut model, &json!({
+            "maxReferences":2, "maxReferencesByDuration":{"4":2,"6":2,"8":3}, "durations":[4,6,8]
+        }));
+        store.projects[0].models = Some(vec![model]);
+    }
     let (connection, worker) = local_control(vec![Some(capability("service-a")), None], None);
     runtime.dispatch("cutflow.connection.save", json!({"baseUrl":connection.base_url,"apiKey":"fixture"})).unwrap();
     assert!(runtime.dispatch("cutflow.creation.projects.get", json!({"projectId":"project-a","refresh":true})).is_err());
     let existing = runtime.dispatch("cutflow.creation.projects.get", json!({"projectId":"project-a"})).unwrap();
     assert_eq!(existing["state"], "ready");
     assert_eq!(existing["flowProjectId"], "real-google-project");
+    assert_eq!(existing["models"][0]["id"], "gflow-veo-3.1-fast");
+    assert_eq!(existing["models"][0]["maxReferencesByDuration"]["8"], 3);
     assert_eq!(worker.join().unwrap()[1]["op"], "projects.get");
 }
 
@@ -481,5 +491,87 @@ fn control_completion_errors_keep_machine_code_and_message_without_an_instance_i
         assert_eq!(result.code,code);
         assert_eq!(result.message,"项目参数或绑定不匹配");
         worker.join().unwrap();
+    }
+}
+
+
+#[test]
+fn authoritative_project_catalog_rejects_stale_models_and_explicitly_empty_lists() {
+    let runtime = ready_runtime();
+    {
+        let mut store = runtime.store.lock().unwrap();
+        // An unrelated global model must not override the fixed account's catalog.
+        store.models.push(flow::describe("gflow-veo-3.1-fast", ""));
+        store.projects[0].models = Some(vec![flow::describe("gflow-nano-banana-2.1", "")]);
+    }
+    let mut params = request("stale-model", "session-a", "turn-stale-model");
+    params["model"] = json!("gflow-veo-3.1-fast");
+    params["kind"] = json!("video");
+    assert_eq!(runtime.reserve("cutflow.generate", params.clone()).err().unwrap().code, "invalid_model");
+    params["model"] = json!("gflow-nano-banana-custom");
+    params["kind"] = json!("image");
+    assert_eq!(runtime.reserve("cutflow.generate", params.clone()).err().unwrap().code, "invalid_model");
+    {
+        let mut store = runtime.store.lock().unwrap();
+        store.projects[0].models = Some(vec![]);
+    }
+    params["model"] = json!("gflow-nano-banana-2.1");
+    assert_eq!(runtime.reserve("cutflow.generate", params).err().unwrap().code, "invalid_model");
+    assert!(runtime.store.lock().unwrap().jobs.is_empty());
+}
+
+#[test]
+fn authoritative_global_catalog_rejects_stale_models_when_project_metadata_is_absent() {
+    let runtime = ready_runtime();
+    runtime.store.lock().unwrap().models.push(flow::describe("gflow-nano-banana-2.1", ""));
+    let mut params = request("stale-global-model", "session-a", "turn-stale-global");
+    params["model"] = json!("gflow-nano-banana-retired");
+    assert_eq!(runtime.reserve("cutflow.generate", params).err().unwrap().code, "invalid_model");
+    assert!(runtime.store.lock().unwrap().jobs.is_empty());
+}
+
+#[test]
+fn video_reference_limits_use_the_submitted_duration_and_preserve_project_binding() {
+    for (model_id, limits) in [
+        ("gflow-veo-3.1-fast", json!({"4":2,"6":2,"8":3})),
+        ("gflow-veo-3.1-lite", json!({"4":2,"6":2,"8":3})),
+        ("gflow-veo-3.1-quality", json!({"4":2,"6":2,"8":0})),
+        ("gflow-omni-1.1-flash", json!({"4":3,"6":3,"8":3,"10":3})),
+    ] {
+        let runtime = ready_runtime();
+        {
+            let mut store = runtime.store.lock().unwrap();
+            let mut model = flow::describe(model_id, "");
+            flow::apply_model_metadata(&mut model, &json!({
+                "maxReferences":0, "maxReferencesByDuration":limits,
+                "durations":if model_id.contains("omni") { vec![4,6,8,10] } else { vec![4,6,8] }
+            }));
+            store.projects[0].models = Some(vec![model]);
+        }
+        for (duration, limit) in limits.as_object().unwrap() {
+            let mut params = request("duration-limit", "session-a", "turn-duration-limit");
+            params["model"] = json!(model_id);
+            params["kind"] = json!("video");
+            params["duration"] = json!(duration.parse::<u64>().unwrap());
+            let limit = limit.as_u64().unwrap() as usize;
+            params["references"] = json!((0..limit+1).map(|i| format!("image-{i}.png")).collect::<Vec<_>>());
+            assert_eq!(runtime.bind_generation(&mut params).unwrap_err().code, "invalid_reference");
+            params["references"] = json!((0..limit).map(|i| format!("image-{i}.png")).collect::<Vec<_>>());
+            runtime.bind_generation(&mut params).unwrap();
+            assert_eq!(params["gflow_project_id"], "real-google-project");
+            assert_eq!(params["gflow_instance_id"], "service-a");
+            if duration == "8" {
+                params.as_object_mut().unwrap().remove("duration");
+                runtime.bind_generation(&mut params).unwrap();
+            }
+        }
+        for duration in [json!("4"), json!(5), json!(0), json!(-1), Value::Null] {
+            let mut params = request("invalid-duration", "session-a", "turn-invalid-duration");
+            params["model"] = json!(model_id);
+            params["kind"] = json!("video");
+            params["duration"] = duration;
+            assert_eq!(runtime.bind_generation(&mut params).unwrap_err().code, "invalid_request");
+        }
+        assert!(runtime.store.lock().unwrap().jobs.is_empty());
     }
 }

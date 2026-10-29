@@ -51,7 +51,10 @@ export function useSettingsPage() {
     restoreDefaultSettings();
     updater.setAutoCheck(false);
   };
-  const activeSettingsSection = ref<SettingsSectionId>('settings-download');
+  const activeSettingsSection = computed<SettingsSectionId>({
+    get: () => ui.settingsSection,
+    set: (section) => { ui.settingsSection = section; },
+  });
   const availableSettingsSections = computed(() =>
     updater.supported ? settingsSections : settingsSections.filter((section) => section.id !== 'settings-update'),
   );

@@ -57,6 +57,35 @@ describe('project creation store consistency', () => {
     expect(store.locked).toBe(false)
   })
 
+  it('keeps authoritative completion when a late submit acknowledgement has no revision', () => {
+    const store = seeded()
+    const completed = { ...job('job-a', 's-a', 12, 'completed'), result: { assets: [{ path: 'D:/done.png' }] } }
+    store.mergeJob(completed)
+    store.turns['s-a'] = [turn(completed)]
+    const acknowledgement = { ...job('job-a', 's-a', 0, 'queued'), revision: undefined }
+    store.mergeJob(acknowledgement)
+    expect(store.jobs['job-a']).toMatchObject({ status: 'completed', revision: 12 })
+    expect(store.turns['s-a'][0].job.result?.assets?.[0].path).toBe('D:/done.png')
+    expect(store.locked).toBe(false)
+  })
+
+  it('reconciles known running history omitted by the initial active-only snapshot', async () => {
+    const store = seeded()
+    const running = job('job-a', 's-a', 10, 'running')
+    store.mergeJob(running)
+    store.turns['s-a'] = [turn(running)]
+    invoke.mockImplementation((_cmd, input) => {
+      if (input.method === 'cutflow.jobs.list') return Promise.resolve({ jobs: [], revision: 12 })
+      if (input.method === 'cutflow.jobs.get') return Promise.resolve({ ...running, status: 'completed', revision: 12 })
+      throw new Error('Unexpected API: ' + input.method)
+    })
+    await store.poll()
+    expect(invoke.mock.calls.map(([, input]) => input.method)).toEqual(['cutflow.jobs.list', 'cutflow.jobs.get'])
+    expect(store.jobs['job-a'].status).toBe('completed')
+    expect(store.locked).toBe(false)
+    expect(store.revision).toBe(12)
+  })
+
   it('preserves a newly received turn when an older in-flight history page finishes later', async () => {
     const store = seeded()
     const list = deferred<{ turns: CreationTurn[]; nextCursor: null }>()

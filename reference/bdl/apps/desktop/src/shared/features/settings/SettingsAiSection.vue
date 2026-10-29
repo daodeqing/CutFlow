@@ -4,6 +4,7 @@ import UiButton from '../../ui/Button.vue';
 import { cutflow, errorMessage, type CreationCatalog, type AiModel } from '../../api/cutflow';
 
 const baseUrl = ref('');
+const savedBaseUrl = ref('');
 const apiKey = ref('');
 const busy = ref(false);
 const message = ref('');
@@ -13,8 +14,9 @@ const load = async () => {
   try {
     const snapshot = await cutflow<CreationCatalog>('cutflow.creation.catalog');
     baseUrl.value = snapshot.connection.baseUrl;
+    savedBaseUrl.value = snapshot.connection.baseUrl;
     textModels.value = snapshot.models.filter(
-      (item) => item.kind === 'text' || (/^(gpt-|api-6|gemini-)/.test(item.id) && !/image|banana/.test(item.id)),
+      (item) => item.kind === 'text' || item.kind === 'unknown',
     );
     testModel.value = textModels.value.find((item) => item.id === 'gpt-6-luna')?.id || textModels.value[0]?.id || '';
   } catch (error) {
@@ -25,12 +27,15 @@ const save = async (check: boolean) => {
   busy.value = true;
   message.value = '';
   try {
-    await cutflow('cutflow.connection.save', { baseUrl: baseUrl.value, apiKey: apiKey.value });
-    apiKey.value = '';
+    if (baseUrl.value.trim() !== savedBaseUrl.value.trim() || apiKey.value) {
+      await cutflow('cutflow.connection.save', { baseUrl: baseUrl.value, apiKey: apiKey.value });
+      savedBaseUrl.value = baseUrl.value;
+      apiKey.value = '';
+    }
     message.value = '设置已保存，密钥加密保存在 portable 内。';
     if (check) {
       const result = await cutflow<{ models: AiModel[] }>('cutflow.models.list');
-      textModels.value = result.models.filter((item) => item.kind === 'text');
+      textModels.value = result.models.filter((item) => item.kind === 'text' || item.kind === 'unknown');
       testModel.value ||=
         textModels.value.find((item) => item.id === 'gpt-6-luna')?.id || textModels.value[0]?.id || '';
       message.value = `已读取 ${result.models.length} 个模型；尚未验证实际回复。可点击下方测试回复。`;
@@ -45,8 +50,11 @@ const testReply = async () => {
   busy.value = true;
   message.value = '';
   try {
-    await cutflow('cutflow.connection.save', { baseUrl: baseUrl.value, apiKey: apiKey.value });
-    apiKey.value = '';
+    if (baseUrl.value.trim() !== savedBaseUrl.value.trim() || apiKey.value) {
+      await cutflow('cutflow.connection.save', { baseUrl: baseUrl.value, apiKey: apiKey.value });
+      savedBaseUrl.value = baseUrl.value;
+      apiKey.value = '';
+    }
     const result = await cutflow<{ model: string; answer: string }>('cutflow.connection.test', {
       model: testModel.value,
     });
@@ -80,7 +88,7 @@ onMounted(load);
     </div>
     <label for="flow-test-model">测试回复模型</label
     ><select id="flow-test-model" v-model="testModel">
-      <option v-for="item in textModels" :key="item.id" :value="item.id">{{ item.id }}</option>
+      <option v-for="item in textModels" :key="item.id" :value="item.id">{{ item.id }}{{ item.kind === 'unknown' ? '（能力未验证）' : '' }}</option>
     </select>
     <UiButton variant="secondary" :disabled="busy || !baseUrl || !testModel" @click="testReply"
       >测试实际回复（少量用量）</UiButton

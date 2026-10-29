@@ -1853,13 +1853,14 @@ dependencies = [
 
 [[package]]
 name = "cutflow-workbench"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "base64 0.22.1",
  "bdl-core",
  "bpi-rs",
  "concat-project",
  "cutflow-download",
+ "quick-xml 0.38.4",
  "regex",
  "reqwest",
  "serde",

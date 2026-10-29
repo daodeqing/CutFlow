@@ -16,6 +16,7 @@ pub struct Hub {
     server: Mutex<Option<server::Server>>,
     launch: Mutex<()>,
     downloads: Mutex<()>,
+    pub(crate) watch: Mutex<()>,
     quitting: std::sync::atomic::AtomicBool,
 }
 
@@ -80,6 +81,7 @@ pub fn install(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::err
         server: Mutex::new(None),
         launch: Mutex::new(()),
         downloads: Mutex::new(()),
+        watch: Mutex::new(()),
         quitting: std::sync::atomic::AtomicBool::new(false),
     });
     let handle = app.handle().clone();
@@ -88,6 +90,14 @@ pub fn install(app: &mut tauri::App) -> std::result::Result<(), Box<dyn std::err
     app.asset_protocol_scope().allow_directory(&root, true)?;
     commands::start_queue_processing(app.handle());
     commands::start_account_startup_verification(app.handle());
+    let monitor_handle = app.handle().clone();
+    std::thread::spawn(move || loop {
+        for _ in 0..60 {
+            std::thread::sleep(Duration::from_secs(1));
+            if monitor_handle.state::<Hub>().quitting.load(std::sync::atomic::Ordering::SeqCst) { return; }
+        }
+        let _ = crate::localize_watch::scan(&monitor_handle, false);
+    });
     let show = tauri::menu::MenuItem::with_id(app, "show", "打开 CutFlow", true, None::<&str>)?;
     let exit =
         tauri::menu::MenuItem::with_id(app, "exit", "退出并停止本地任务", true, None::<&str>)?;
@@ -138,7 +148,8 @@ pub fn active(app: &AppHandle) -> bool {
             })
         })
         .unwrap_or(false);
-    generating || downloading
+    let monitoring = crate::localize_watch::list(app).ok().and_then(|value| value["watches"].as_array().map(|items| !items.is_empty())).unwrap_or(false);
+    generating || downloading || monitoring
 }
 
 pub fn quit(app: AppHandle) {
@@ -354,10 +365,21 @@ fn bdl_dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
                     .to_string_lossy()
                     .into_owned()
             });
-            let request: commands::SelectionCreateTasksRequest = serde_json::from_value(
-                json!({"source_id":tree.source.id.0,"part_ids":part_ids,
-                "output_dir":output,"quality":params["quality"].as_str().unwrap_or("120"),"missing_quality_policy":if params["allowLower"]==true {"lower"} else {"skip"}}),
-            )?;
+            let mut request_value = json!({"source_id":tree.source.id.0,"part_ids":part_ids,
+                "output_dir":output,"quality":params["quality"].as_str().unwrap_or("120"),"missing_quality_policy":if params["allowLower"]==true {"lower"} else {"skip"}});
+            if params["localizationAssets"] == true {
+                request_value["output_dir"] = json!(hub.runtime.root.join("downloads"));
+                request_value["media_mode"] = json!("audio_video");
+                request_value["output_extension"] = json!("mp4");
+                request_value["retain_raw_streams"] = json!(false);
+                request_value["embed_cover"] = json!(false);
+                request_value["archive_mode"] = json!("custom");
+                request_value["archive_assets"] = json!({"cover":false,"subtitles":true,"danmaku":true,"nfo":false});
+                request_value["embed_subtitles"] = json!(false);
+                request_value["subtitle_format"] = json!("srt");
+                request_value["danmaku_format"] = json!("xml");
+            }
+            let request: commands::SelectionCreateTasksRequest = serde_json::from_value(request_value)?;
             ledger[operation] = json!({"params":params});
             atomic_json(&ledger_path, &ledger)?;
             let (job, _fresh, cancel) = hub
@@ -447,6 +469,102 @@ fn bdl_dispatch(app: &AppHandle, method: &str, params: &Value) -> Result<Value> 
     }
 }
 
+// Download and localization use separate persistent jobs. The parent keeps the
+// exact user request; a temporary copy receives the resolved media paths.
+fn localization_sidecar(task: &bdl_core::queue::DownloadTask, intent: bdl_core::queue::DownloadResourceIntent, extensions: &[&str]) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    for artifact in &task.media_selection.artifacts {
+        if artifact.intent == Some(intent) { candidates.push(artifact.path.clone()); }
+    }
+    for resource in &task.resources {
+        if resource.intent == intent && resource.status == bdl_core::queue::ResourceStatus::Completed {
+            candidates.push(resource.target_path.clone());
+            for ext in extensions { candidates.push(resource.target_path.with_extension(ext)); }
+        }
+    }
+    for ext in extensions {
+        if let Some(path) = candidates.iter().find(|path| path.is_file() && path.extension().is_some_and(|value| value.eq_ignore_ascii_case(ext))) {
+            return Some(path.clone());
+        }
+    }
+    None
+}
+
+pub(crate) fn localization_start(app: &AppHandle, params: Value) -> Result<Value> {
+    required(&params, "operationId")?;
+    required(&params, "model")?;
+    required(&params, "rights")?;
+    let has_task = params["taskId"].as_str().is_some_and(|s| !s.trim().is_empty());
+    let has_url = params["url"].as_str().is_some_and(|s| !s.trim().is_empty());
+    if has_task == has_url { return Err(Error::new("invalid_request", "请选择一个已完成任务或填写一个视频链接")); }
+    let runtime = app.state::<Hub>().runtime.clone();
+    let (job, fresh, cancel) = runtime.reserve("cutflow.localize.run", params)?;
+    if fresh {
+        let handle = app.clone();
+        let running = job.clone();
+        std::thread::spawn(move || {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<Value> {
+                let cancelled = || cancel.load(std::sync::atomic::Ordering::SeqCst);
+                let task_id = if let Some(id) = running.params["taskId"].as_str().filter(|s| !s.trim().is_empty()) {
+                    id.to_owned()
+                } else {
+                    runtime.update(&running.id, "正在创建 B站下载任务");
+                    let response = bdl_dispatch(&handle, "cutflow.bilibili.download", &json!({
+                        "operationId":format!("localize-download-{}", running.id),
+                        "url":running.params["url"], "rights":running.params["rights"],
+                        "parts":running.params["parts"].as_str().unwrap_or("1"),
+                        "quality":running.params["quality"].as_str().unwrap_or("80"), "allowLower":true, "localizationAssets":true
+                    }))?;
+                    let child_id = response["jobId"].as_str().ok_or_else(|| Error::new("download_error", "下载任务没有返回编号"))?.to_owned();
+                    runtime.update(&running.id, "正在下载 B站视频与可用字幕、弹幕");
+                    loop {
+                        if cancelled() {
+                            let _ = runtime.dispatch("cutflow.jobs.cancel", json!({"jobId":child_id}));
+                            return Err(Error::new("cancelled", "已请求停止下载与英文制作；已完成文件保留"));
+                        }
+                        let child = runtime.dispatch("cutflow.jobs.get", json!({"jobId":child_id}))?;
+                        match child["status"].as_str().unwrap_or("") {
+                            "completed" => {
+                                let tasks = child["result"]["tasks"].as_array().ok_or_else(|| Error::new("download_error", "下载没有返回素材"))?;
+                                if tasks.len() != 1 { return Err(Error::new("invalid_request", "英文制作一次只能处理一个分P")); }
+                                break tasks[0]["id"].as_str().ok_or_else(|| Error::new("download_error", "下载任务缺少编号"))?.to_owned();
+                            }
+                            "failed" | "cancelled" | "interrupted" | "result_unknown" => {
+                                return Err(Error::new("download_error", child["stage"].as_str().unwrap_or("下载未完成，请查看下载队列")));
+                            }
+                            _ => std::thread::sleep(Duration::from_millis(800)),
+                        }
+                    }
+                };
+                if cancelled() { return Err(Error::new("cancelled", "英文制作已取消")); }
+                let state = handle.state::<AppState>();
+                let task = state.task_snapshot(&task_id).map_err(|error| bdl_error(error.into()))?;
+                if task.status != bdl_core::queue::TaskStatus::Completed || !task.output_path.is_file() {
+                    return Err(Error::new("invalid_media", "所选下载尚未完成或视频文件不存在"));
+                }
+                let subtitle = localization_sidecar(&task, bdl_core::queue::DownloadResourceIntent::Subtitle, &["srt", "json"]);
+                let danmaku = localization_sidecar(&task, bdl_core::queue::DownloadResourceIntent::Danmaku, &["xml"]);
+                let mut resolved = running.clone();
+                resolved.params["videoPath"] = json!(task.output_path);
+                resolved.params["subtitlePath"] = json!(subtitle);
+                resolved.params["danmakuPath"] = json!(danmaku);
+                resolved.params["title"] = json!(task.title);
+                let source_url = running.params["url"].as_str().map(str::to_owned).or_else(|| task.refresh_intent.as_ref().map(|intent| match &intent.input {
+                    bdl_core::queue::DownloadTaskRefreshInput::VideoBvid { bvid } => format!("https://www.bilibili.com/video/{bvid}"),
+                    bdl_core::queue::DownloadTaskRefreshInput::VideoAid { aid } => format!("https://www.bilibili.com/video/av{aid}"),
+                    bdl_core::queue::DownloadTaskRefreshInput::BangumiEpisode { ep_id } => format!("https://www.bilibili.com/bangumi/play/ep{ep_id}"),
+                    bdl_core::queue::DownloadTaskRefreshInput::CheeseEpisode { ep_id } => format!("https://www.bilibili.com/cheese/play/ep{ep_id}"),
+                }));
+                resolved.params["sourceUrl"] = json!(source_url);
+                drop(state);
+                cutflow_workbench::localization::run(&runtime, &resolved, &cancel)
+            })).unwrap_or_else(|_| Err(Error::new("interrupted", "英文制作异常结束，请检查已保存素材")));
+            runtime.finish(&running.id, outcome);
+        });
+    }
+    Ok(json!({"jobId":job.id,"status":job.status}))
+}
+
 pub fn dispatch(app: &AppHandle, call: Call) -> Result<Value> {
     let hub = app.state::<Hub>();
     let root = &hub.runtime.root;
@@ -456,6 +574,35 @@ pub fn dispatch(app: &AppHandle, call: Call) -> Result<Value> {
         return bdl_dispatch(app, method, &params);
     }
     match method {
+        "cutflow.localize.start" => localization_start(app, params),
+        "cutflow.localize.post" => cutflow_workbench::localization::regenerate_post(&hub.runtime, &params),
+        "cutflow.x.browser" => {
+            let text = required(&params, "text")?;
+            if text.len() > 4000 { return Err(Error::new("invalid_request", "文案过长，请缩短后打开 X")); }
+            let mut url = tauri::Url::parse("https://x.com/intent/post")
+                .map_err(|_| Error::new("invalid_request", "X 地址无效"))?;
+            url.query_pairs_mut().append_pair("text", text);
+            app.opener().open_url(url.as_str(), None::<&str>)
+                .map_err(|_| Error::new("platform_error", "无法打开系统浏览器，请手动打开 X"))?;
+            Ok(json!({"opened":true,"prefilledText":true,"automaticUpload":false,"automaticPosting":false}))
+        },
+        "cutflow.localize.watch.list" => crate::localize_watch::list(app),
+        "cutflow.localize.watch.add" => crate::localize_watch::add(app, &params),
+        "cutflow.localize.watch.remove" => crate::localize_watch::remove(app, required(&params, "watchId")?),
+        "cutflow.localize.watch.scan" => { crate::localize_watch::spawn_scan(app.clone()); Ok(json!({"started":true})) },
+        "cutflow.x.compose" => {
+            if let Some(window) = app.get_webview_window("x-publish") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            } else {
+                // This remote window has no Tauri capability (only main does).
+                let url = "https://x.com/compose/post".parse().map_err(|_| Error::new("invalid_request", "X 地址无效"))?;
+                tauri::WebviewWindowBuilder::new(app, "x-publish", tauri::WebviewUrl::External(url))
+                    .title("X · 发布审核").inner_size(900.0, 700.0).build()
+                    .map_err(|_| Error::new("platform_error", "无法打开 X 发布窗口，请手动登录 X 并上传成片"))?;
+            }
+            Ok(json!({"opened":true,"automaticPosting":false}))
+        }
         "cutflow.editor.status" => Ok(editor_status(root)),
         "cutflow.editor.open" | "cutflow.editor.focus" => open_editor(&hub, params),
         "cutflow.editor.recents" => {

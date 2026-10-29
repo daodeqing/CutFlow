@@ -108,7 +108,7 @@ jobs:
         run: python -B -X utf8 scripts/build_windows.py --component package --installer
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: CutFlow-0.6.5-windows-x64
+          name: CutFlow-0.6.6-windows-x64
           path: |
             dist/*.zip
             dist/*.sha256

@@ -1,4 +1,5 @@
 mod cutflow;
+mod localize_watch;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,6 +19,8 @@ pub fn run() {
         .setup(cutflow::install)
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Secondary windows have their own lifetime and must not exit the hub.
+                if window.label() != "main" { return; }
                 let active = cutflow::active(window.app_handle());
                 eprintln!("CutFlow close requested: active tasks={active}");
                 if active {

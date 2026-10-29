@@ -165,7 +165,21 @@ const automaticReference = computed(() =>
 const effectiveReferences = computed(() => [
   ...new Set([...(automaticReference.value ? [automaticReference.value.path] : []), ...draft.value.references]),
 ]);
-const referenceLimit = computed(() => capability.value?.maxReferences ?? 3);
+const referenceLimit = computed(() => {
+  const timed = creation.kind === 'video' ? capability.value?.maxReferencesByDuration?.[draft.value.duration] : undefined;
+  return typeof timed === 'number' && Number.isFinite(timed) && timed >= 0
+    ? timed : capability.value?.maxReferences ?? 3;
+});
+const referenceLimitMessage = computed(() =>
+  referenceLimit.value === 0
+    ? creation.kind === 'video'
+      ? '当前模型在此时长不支持参考图，请移除参考图或切换时长 / 模型。'
+      : '当前模型不支持参考图，请先移除参考图或切换模型。'
+    : '当前模型最多支持 ' + referenceLimit.value + ' 张参考图，请先移除部分图片。',
+);
+const referenceIssue = computed(() =>
+  effectiveReferences.value.length > referenceLimit.value ? referenceLimitMessage.value : '',
+);
 const canGenerate = computed(
   () =>
     creation.project?.state === 'ready' &&
@@ -184,8 +198,9 @@ const sessionWindow = computed(() =>
   calculateVirtualWindow(sessions.value.length, sessionOffset.value, sessionHeight.value, 60),
 );
 const visibleSessions = computed(() => sessions.value.slice(sessionWindow.value.start, sessionWindow.value.end));
-const statusLabel = (status: string) =>
-  ({
+const isDownloading = (job: Job) => /^downloading(?::|$)/.test(job.stage);
+const statusLabel = (status: string, stage = '') =>
+  status === 'running' && /^downloading(?::|$)/.test(stage) ? '下载中' : ({
     queued: '等待中',
     running: '生成中',
     completed: '已保存',
@@ -196,7 +211,7 @@ const statusLabel = (status: string) =>
   })[status] || status;
 const projectStatus = (state: string) =>
   ({
-    ready: '已连接 Flow',
+    ready: '已绑定 Flow',
     creating: '正在创建',
     failed: '创建失败',
     creation_unknown: '创建结果待核查',
@@ -316,6 +331,8 @@ async function newProject() {
       creation.catalog.models.find((item) => modelKind(item) === 'image')?.id ||
       'gflow-nano-banana-2-lite';
     const project = await creation.createProject(projectName.value.trim(), preferred, projectOperation.value);
+    // 创建入口已核查能力；读取轻量本地快照，避免弹窗继续使用旧的未确认状态。
+    await creation.loadCatalog();
     projectExpanded.value = true;
     projectDialog.value = false;
     if (project.state === 'ready') {
@@ -344,6 +361,10 @@ async function checkProject() {
   }
 }
 async function chooseReferences() {
+  if (referenceLimit.value === 0) {
+    notice.value = referenceLimitMessage.value;
+    return;
+  }
   try {
     const paths = await open({
       multiple: true,
@@ -355,7 +376,7 @@ async function chooseReferences() {
       merged.length + (automaticReference.value && !merged.includes(automaticReference.value.path) ? 1 : 0) >
       referenceLimit.value
     ) {
-      notice.value = '当前模型最多支持 ' + referenceLimit.value + ' 张参考图，请先移除部分图片。';
+      notice.value = referenceLimitMessage.value;
       return;
     }
     draft.value.references = merged;
@@ -391,7 +412,7 @@ function addSavedReference(path: string, prompt: string) {
     paths.length + (automaticReference.value && !paths.includes(automaticReference.value.path) ? 1 : 0) >
     referenceLimit.value
   ) {
-    notice.value = '当前模型最多支持 ' + referenceLimit.value + ' 张参考图。';
+    notice.value = referenceLimitMessage.value;
     return;
   }
   draft.value.references = paths;
@@ -409,7 +430,7 @@ async function submit() {
     return;
   }
   if (effectiveReferences.value.length > referenceLimit.value) {
-    notice.value = '当前模型最多支持 ' + referenceLimit.value + ' 张参考图。';
+    notice.value = referenceLimitMessage.value;
     return;
   }
   if (!canGenerate.value) return;
@@ -459,7 +480,7 @@ async function submit() {
         prompt,
         params: parameters,
         createdAt: Date.now(),
-        job,
+        job: creation.jobs[job.id] || job,
       });
     const session = (creation.sessions[pid] || []).find((item) => item.id === sid);
     if (session) {
@@ -489,13 +510,24 @@ async function stopJob(job: Job) {
   }
 }
 async function retryDownload(job: Job) {
-  if (creation.locked) return;
+  const sid = String(job.params.sessionId || creation.activeSessionId);
+  if (creation.pending[sid] || Object.values(creation.jobs).some((item) => item.params.sessionId === sid && isRunning(item))) return;
+  creation.pending[sid] = 'download:' + job.id;
   try {
     await cutflow('cutflow.jobs.retryDownload', { jobId: job.id });
-    creation.mergeJob({ ...job, status: 'running', error: null, stage: '正在重新下载已生成结果' });
+    const current = creation.jobs[job.id] || job;
+    // 下载回执可能晚于轮询的完成结果；只更新尚未推进的旧快照。
+    if ((current.revision || 0) <= (job.revision || 0) && current.status !== 'completed') {
+      creation.mergeJob({
+        ...current, status: 'running', error: null, stage: 'downloading',
+        progress: { stage: '正在重新下载已生成结果', basis: 'stage' },
+      });
+    }
     schedulePoll();
   } catch (reason) {
     notice.value = errorMessage(reason);
+  } finally {
+    delete creation.pending[sid];
   }
 }
 async function openFile(path: string) {
@@ -808,7 +840,7 @@ onUnmounted(() => {
             <header>
               <span class="turn-avatar"><UIcon name="i-tabler-sparkles" aria-hidden="true" /></span
               ><strong>{{ modelName(turn.params.model) }}</strong
-              ><span class="turn-state" :data-status="turn.job.status">{{ statusLabel(turn.job.status) }}</span
+              ><span class="turn-state" :data-status="turn.job.status">{{ statusLabel(turn.job.status, turn.job.stage) }}</span
               ><button class="studio-icon-button" aria-label="查看任务详情" @click="details = turn.job">
                 <UIcon name="i-tabler-dots" />
               </button>
@@ -920,10 +952,10 @@ onUnmounted(() => {
           id="ai-prompt"
           v-model="draft.prompt"
           :disabled="!creation.session || creation.project?.state !== 'ready'"
-          placeholder="描述画面，或者告诉我这张图要怎么改…"
+          :placeholder="creation.kind === 'video' ? '描述视频画面、动作和镜头…' : '描述画面，或者告诉我这张图要怎么改…'"
           rows="2"
         />
-        <div v-if="notice" class="composer-message" role="status">{{ notice }}</div>
+        <div v-if="referenceIssue || notice" class="composer-message" role="status">{{ referenceIssue || notice }}</div>
         <footer>
           <div>
             <button type="button" aria-label="添加参考图" :disabled="!creation.session" @click="chooseReferences">
@@ -935,21 +967,23 @@ onUnmounted(() => {
               @click="referencesOpen = true"
             >
               <UIcon name="i-tabler-library" /></button
-            ><select v-model="draft.independent" aria-label="生成方式">
+            ><select v-if="creation.kind === 'image'" v-model="draft.independent" aria-label="生成方式">
               <option :value="false">连续改图</option>
               <option :value="true">独立生成</option>
             </select>
           </div>
           <div>
             <span v-if="creation.locked" class="studio-muted">{{
-              creation.pending[creation.activeSessionId] ? '提交中…' : '当前会话生成中'
+              creation.pending[creation.activeSessionId]
+                ? creation.pending[creation.activeSessionId].startsWith('download:') ? '正在准备下载…' : '提交中…'
+                : creation.activeJob && isDownloading(creation.activeJob) ? '当前会话下载中' : '当前会话生成中'
             }}</span
             ><button
               v-if="creation.activeJob"
               class="send-generation stopping"
               type="button"
               :disabled="isStopping(creation.activeJob)"
-              :aria-label="isStopping(creation.activeJob) ? '正在停止' : '停止当前生成'"
+              :aria-label="isStopping(creation.activeJob) ? '正在停止' : isDownloading(creation.activeJob) ? '停止当前下载' : '停止当前生成'"
               @click="stopJob(creation.activeJob)"
             >
               <UIcon name="i-tabler-player-stop" /></button
@@ -1070,7 +1104,7 @@ onUnmounted(() => {
         </section>
       </div>
       <footer class="parameter-footer">
-        <UiButton variant="ghost" @click="ui.setTab('settings')"
+        <UiButton variant="ghost" @click="ui.openSettings('settings-ai')"
           ><UIcon name="i-tabler-plug-connected" aria-hidden="true" />连接设置</UiButton
         >
       </footer>
@@ -1093,8 +1127,8 @@ onUnmounted(() => {
         <p class="studio-muted">
           系统自动选择可用账号。项目内的所有聊天会使用同一个 Flow 项目，创建项目不会发起图片生成。
         </p>
-        <p v-if="!creation.catalog.projectBinding" class="studio-notice">
-          正在检查项目连接能力；如果未就绪，请先更新 GFlow 插件并检查连接。
+        <p v-if="!creation.catalog.projectBinding" class="studio-muted">
+          创建时会核查当前服务的项目绑定能力；不支持时会显示具体原因。
         </p>
         <p v-if="projectError" class="turn-error" role="alert">{{ projectError }}</p>
         <UiButton type="submit" :disabled="creatingProject || !projectName.trim()">{{
@@ -1115,7 +1149,7 @@ onUnmounted(() => {
     >
     <UiDialog :model-value="!!details" title="作品与任务详情" @update:model-value="!$event && (details = null)"
       ><template v-if="details"
-        ><p>{{ statusLabel(details.status) }} · {{ modelName(details.params.model) }}</p>
+        ><p>{{ statusLabel(details.status, details.stage) }} · {{ modelName(details.params.model) }}</p>
         <p class="generation-prompt">{{ details.params.prompt }}</p>
         <p class="turn-error">{{ details.error?.message || details.stage }}</p>
         <p class="studio-muted">

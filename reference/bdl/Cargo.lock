@@ -1101,7 +1101,7 @@ checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
 
 [[package]]
 name = "cutflow-desktop"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "bdl-core",
  "bdl-mobile-credentials",
@@ -1131,13 +1131,14 @@ dependencies = [
 
 [[package]]
 name = "cutflow-workbench"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "base64 0.22.1",
  "bdl-core",
  "bpi-rs",
  "concat-project",
  "cutflow-download",
+ "quick-xml 0.38.4",
  "regex",
  "reqwest 0.12.28",
  "serde",

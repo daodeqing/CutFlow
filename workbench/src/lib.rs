@@ -2,6 +2,7 @@
 pub mod accounts;
 pub mod creation;
 pub mod flow;
+pub mod localization;
 pub mod media;
 pub mod protocol;
 pub mod server;
