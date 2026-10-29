@@ -15,11 +15,13 @@ def check_versions():
         'frontend': json.loads((DESKTOP / 'package.json').read_text(encoding='utf-8'))['version'],
         'desktop': tomllib.loads((DESKTOP / 'src-tauri/Cargo.toml').read_text(encoding='utf-8'))['package']['version'],
         'workbench': tomllib.loads((ROOT / 'workbench/Cargo.toml').read_text(encoding='utf-8'))['package']['version'],
+        'transcriber': tomllib.loads((ROOT / 'transcriber/Cargo.toml').read_text(encoding='utf-8'))['package']['version'],
     }
     for label, actual in files.items():
         assert actual == version, f'{label}: {actual} != {version}'
     for relative, names in [('reference/bdl/Cargo.lock', ['cutflow-desktop', 'cutflow-workbench']),
                             ('workbench/Cargo.lock', ['cutflow-workbench']),
+                            ('transcriber/Cargo.lock', ['cutflow-transcribe']),
                             ('editor/src/Cargo.lock', ['cutflow-workbench'])]:
         packages = tomllib.loads((ROOT / relative).read_text(encoding='utf-8'))['package']
         for name in names:
@@ -37,7 +39,7 @@ def check_versions():
     agent = (ROOT / 'workbench/src/agent.rs').read_text(encoding='utf-8')
     assert agent.count('env!("CARGO_PKG_VERSION")') >= 2, 'CLI and MCP must use the package version'
     assert f'CutFlow {version}' in (ROOT / 'README.md').read_text(encoding='utf-8')
-    return {'version': version, 'status': 'passed', 'manifests': 4, 'lockEntries': 4, 'labels': len(expected)}
+    return {'version': version, 'status': 'passed', 'manifests': 5, 'lockEntries': 5, 'labels': len(expected)}
 
 
 if __name__ == '__main__':
