@@ -370,6 +370,9 @@ impl Runtime {
             return Ok((previous, false, Arc::new(AtomicBool::new(false))));
         }
         if method == "cutflow.generate" { self.bind_generation(&mut params)?; }
+        if method == "cutflow.localize.run" && self.store.lock().unwrap().jobs.iter().any(|job| job.method == method && matches!(job.status.as_str(), "queued" | "running")) {
+            return Err(Error::new("busy", "已有英文制作任务运行，请等待完成"));
+        }
         let mut store = self.store.lock().unwrap();
         if self.cancels.lock().unwrap().len() >= 4 { return Err(Error::new("busy", "同时最多执行四个后台任务")); }
         if method == "cutflow.generate" {
@@ -502,7 +505,7 @@ impl Runtime {
                     .map_err(|message| Error::new("download_error", message))?;
                 Ok(json!({"formats":text}))
             }
-            "cutflow.generate" | "cutflow.bilibili.download" => self.background(method, params),
+            "cutflow.generate" | "cutflow.bilibili.download" | "cutflow.localize.run" => self.background(method, params),
             "cutflow.jobs.retryDownload" => {
                 let id = required(&params, "jobId")?;
                 let mut job = self.store.lock().unwrap().jobs.iter().find(|job| job.id == id).cloned()
@@ -673,6 +676,7 @@ impl Runtime {
     }
 
     pub fn execute(&self, job: &Job, cancel: &Arc<AtomicBool>) -> Result<Value> {
+        if job.method == "cutflow.localize.run" { return crate::localization::run(self, job, cancel); }
         let folder = self.output_folder(job)?;
         std::fs::create_dir_all(&folder)?;
         match job.method.as_str() {

@@ -79,6 +79,7 @@ def build(installer, skip_smoke, component):
             cargo(['check', '--locked', '--manifest-path', f'{manifest}/Cargo.toml'])
         run([sys.executable, '-B', 'tests/check_callback_wiring.py'])
         cargo(['test', '--locked', '-p', 'concat-project'], 'editor/src')
+        cargo(['build', '--locked', '--release', '--manifest-path', 'transcriber/Cargo.toml', '--bin', 'cutflow-transcribe'])
         cargo(['build', '--locked', '--release', '--manifest-path', 'workbench/Cargo.toml', '--bin', 'cutflow-agent'])
         cargo(['build', '--locked', '--release', '-p', 'bdl-cli'], 'reference/bdl')
         cargo(['build', '--locked', '--profile', 'app', '-p', 'concat', '--config', 'profile.app.lto=false',
@@ -88,6 +89,7 @@ def build(installer, skip_smoke, component):
         tools = editor / 'tools'
         copy(target / 'app/concat.exe', editor / 'CutFlow-editor.exe')
         copy(target / 'app/concat.exe', tools / 'concat.exe')
+        copy(target / 'release/cutflow-transcribe.exe', tools / 'cutflow-transcribe.exe')
         copy(target / 'release/bdl.exe', tools / 'bdl.exe')
         copy(target / 'release/cutflow-agent.exe', tools / 'cutflow-agent.exe')
         ffmpeg = Path(variables['FFMPEG_DIR'])
@@ -122,7 +124,7 @@ def build(installer, skip_smoke, component):
             raise RuntimeError('Missing build component: ' + name)
         shutil.copytree(source, stage, dirs_exist_ok=True)
     for source, destination in [('README.md', '使用说明.md'), ('docs/创作与外部AI.md', '创作与外部AI.md'),
-                                ('docs/creation-projects.md', '项目与聊天.md'),
+                                ('docs/creation-projects.md', '项目与聊天.md'), ('docs/英文视频工作流.md', '英文视频工作流.md'),
                                 ('docs/验收与已知限制.md', '验收与已知限制.md'), ('docs/SOURCE_OFFER.md', 'SOURCE_OFFER.md'),
                                 ('scripts/启动CutFlow.vbs', '启动CutFlow.vbs'), ('examples/draft.json', 'examples/draft.json')]:
         copy(root / source, stage / destination)
@@ -137,7 +139,7 @@ def build(installer, skip_smoke, component):
         for executable, arguments in [(stage / 'CutFlow.exe', ['--version']), (stage / 'CutFlow-editor.exe', ['--version']),
                                       (stage / 'CutFlow-editor.exe', ['--smoke']), (stage / 'tools/bdl.exe', ['--version']),
                                       (stage / 'tools/ffmpeg.exe', ['-version']), (stage / 'tools/ffprobe.exe', ['-version']),
-                                      (stage / 'tools/cutflow-agent.exe', ['schema'])]:
+                                      (stage / 'tools/cutflow-agent.exe', ['schema']), (stage / 'tools/cutflow-transcribe.exe', ['--version'])]:
             run([executable, *arguments], env=clean)
         for executable in ['CutFlow.exe', 'CutFlow-editor.exe']:
             run([sys.executable, '-B', 'tests/check_windows_startup.py', '--exe', stage / executable, '--state-dir', root / '.build' / (executable + '-startup')], env=clean)
@@ -148,7 +150,7 @@ def build(installer, skip_smoke, component):
         run([sys.executable, '-B', 'tests/check_hub.py', '--stage', stage], env=clean)
         recycle(stage / 'portable')
         (stage / 'portable').mkdir()
-    component_files = ['CutFlow.exe', 'CutFlow-editor.exe', 'tools/concat.exe', 'tools/cutflow-agent.exe', 'tools/bdl.exe']
+    component_files = ['CutFlow.exe', 'CutFlow-editor.exe', 'tools/concat.exe', 'tools/cutflow-agent.exe', 'tools/cutflow-transcribe.exe', 'tools/bdl.exe']
     provenance = {'version':VERSION, 'commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip(),
                   'cloud_run':os.environ.get('GITHUB_RUN_ID'), 'files':{}}
     for name in component_files:

@@ -393,7 +393,7 @@ fn provider_message(payload: &Value) -> String {
 }
 
 pub fn check_response(connection: &Connection, key: &str, model: &str) -> Result<Value> {
-    if describe(model, "").kind != "text" {
+    if matches!(describe(model, "").kind.as_str(), "image" | "video") || model == "gflow-project-control" {
         return Err(Error::new("invalid_request", "请选择普通文本模型测试回复；图片和视频请在创作页测试"));
     }
     let response = agent().post(&format!("{}/chat/completions", base_url(&connection.base_url)?))

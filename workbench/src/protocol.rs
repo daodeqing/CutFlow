@@ -87,6 +87,13 @@ pub const METHODS: &[(&str, &str)] = &[
         "cutflow.bilibili.download",
         "下载指定 url；需要 projectPath、operationId、rights，默认 parts=1、quality=120、allowLower=false",
     ),
+    ("cutflow.localize.run", "将本地视频与字幕、弹幕制作成英文版；需要 operationId、videoPath 和 model，完成后必须审核"),
+    ("cutflow.localize.start", "从 B站链接或已完成下载制作英文版；需要 operationId、rights、model 和 url 或 taskId"),
+    ("cutflow.x.compose", "打开独立 X 发布窗口；用户自行登录、上传并发布"),
+    ("cutflow.localize.watch.list", "列出收藏夹和 UP 主监控及待处理视频"),
+    ("cutflow.localize.watch.add", "添加已获授权的收藏夹或 UP 主监控；首次仅建立基线"),
+    ("cutflow.localize.watch.remove", "停止指定来源监控并移除其待处理列表"),
+    ("cutflow.localize.watch.scan", "立即检查监控来源，不绕过首次基线"),
     ("cutflow.references.list", "列出本地角色和场景参考图"),
     (
         "cutflow.references.save",
@@ -141,7 +148,11 @@ pub fn tools() -> Value {
             "command":{"type":"object"},"commands":{"type":"array","items":{"type":"object"}},
             "version":{"type":"integer","const":1},"stopAt":{"type":"string","const":"draft"},
             "scenes":{"type":"array","items":{"type":"object"}},"output":{"type":"object"},
-            "subtitles":{"type":"boolean"},"bgm":{"type":"string"}
+            "subtitles":{"type":"boolean"},"bgm":{"type":"string"},
+            "taskId":{"type":"string"},"watchId":{"type":"string"},"videoPath":{"type":"string"},"subtitlePath":{"type":"string"},"danmakuPath":{"type":"string"},
+            "sourceUrl":{"type":"string"},"subtitleModel":{"type":"string"},"danmakuModel":{"type":"string"},"postModel":{"type":"string"},
+            "speechModel":{"type":"string"},"transcription":{"enum":["remote","whisper"]},"whisperModel":{"enum":["tiny","base","small"]},
+            "removeBottomText":{"type":"boolean"}
         },"additionalProperties":false}
         });
         let fields=match *method {
@@ -154,6 +165,11 @@ pub fn tools() -> Value {
             "cutflow.creation.turns.list"=>"sessionId cursor limit",
             "cutflow.creation.drafts.save"=>"sessionId kind draft",
             "cutflow.jobs.list"=>"sessionId activeOnly sinceRevision",
+            "cutflow.localize.start"=>"operationId model url taskId parts quality rights subtitleModel danmakuModel postModel speechModel transcription whisperModel removeBottomText",
+            "cutflow.x.compose"=>"",
+            "cutflow.localize.watch.list"|"cutflow.localize.watch.scan"=>"",
+            "cutflow.localize.watch.add"=>"url model rights quality subtitleModel danmakuModel speechModel postModel transcription whisperModel removeBottomText",
+            "cutflow.localize.watch.remove"=>"watchId",
             "cutflow.editor.status"|"cutflow.editor.focus"|"cutflow.editor.recents"=>"",
             "cutflow.editor.open"=>"projectPath",
             "cutflow.project.current"|"cutflow.connection.get"|"cutflow.models.list"|"cutflow.account.start"|"cutflow.account.status"|"cutflow.account.logout"|"cutflow.references.list"=>"",
@@ -170,6 +186,7 @@ pub fn tools() -> Value {
             "cutflow.bilibili.parse"=>"url",
             "cutflow.bilibili.download"=>"projectPath operationId url rights parts quality allowLower",
             "cutflow.references.save"=>"kind name path prompt",
+            "cutflow.localize.run"=>"operationId videoPath subtitlePath danmakuPath sourceUrl title model subtitleModel danmakuModel postModel speechModel transcription whisperModel removeBottomText",
             "cutflow.speech.run"=>"projectPath operationId expectedRevision text voice speed modelId",
             "cutflow.captions.run"=>"projectPath operationId expectedRevision file modelId",
             "cutflow.workflow.run"=>"version projectPath operationId expectedRevision scenes maxGenerationCalls voice subtitles stopAt output bgm",
@@ -192,6 +209,10 @@ pub fn tools() -> Value {
             "cutflow.bilibili.parse"=>"url",
             "cutflow.bilibili.download"=>"projectPath operationId url rights",
             "cutflow.references.save"=>"kind name path",
+            "cutflow.localize.run"=>"operationId videoPath model",
+            "cutflow.localize.start"=>"operationId model rights",
+            "cutflow.localize.watch.add"=>"url model rights",
+            "cutflow.localize.watch.remove"=>"watchId",
             "cutflow.speech.run"=>"projectPath operationId expectedRevision text",
             "cutflow.captions.run"=>"projectPath operationId expectedRevision file",
             "cutflow.workflow.run"=>"version projectPath operationId expectedRevision scenes",
