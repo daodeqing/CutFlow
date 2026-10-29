@@ -20,7 +20,8 @@ export interface ToastAction {
 export const useUiStore = defineStore('ui', {
   state: () => ({
     activeTab: (isMobilePlatform() ? 'parse' : 'bilibili') as AppTab,
-    bilibiliSubTab: 'parse' as 'parse' | 'library' | 'transfer',
+    bilibiliSubTab: 'parse' as 'parse' | 'library' | 'transfer' | 'localize',
+    localizeTaskId: '',
     mobilePersonalPage: 'home' as 'home' | 'settings' | 'about',
     drawerOpen: false,
     dialogOpen: false,

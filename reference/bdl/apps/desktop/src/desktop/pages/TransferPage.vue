@@ -196,6 +196,10 @@ const {
             <span>任务操作</span>
             <strong>{{ contextTaskView?.displayTitle }}</strong>
           </div>
+          <button v-if="contextTaskView?.isCompleted" type="button" role="menuitem"
+            @click="ui.localizeTaskId = contextTaskView.id; ui.bilibiliSubTab = 'localize'; closeContextMenu()">
+            <UIcon name="i-tabler-language" aria-hidden="true" /> 制作英文版
+          </button>
           <button
             v-for="action in contextActions"
             :key="action.kind"

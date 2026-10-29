@@ -10,12 +10,14 @@ const pages = {
   parse: defineAsyncComponent(() => import('./ParsePage.vue')),
   library: defineAsyncComponent(() => import('./LibraryPage.vue')),
   transfer: defineAsyncComponent(() => import('./TransferPage.vue')),
+  localize: defineAsyncComponent(() => import('./LocalizationPage.vue')),
 }
 const selected = computed({ get: () => ui.bilibiliSubTab, set: (value: string) => { if (value in pages) ui.bilibiliSubTab = value as keyof typeof pages } })
 const tabs = computed(() => [
   { label: '链接解析 / 多 P', value: 'parse' },
   { label: '我的收藏与订阅', value: 'library' },
   { label: '下载队列', value: 'transfer', count: transferBadgeCount.value },
+  { label: '英文制作', value: 'localize' },
 ])
 </script>
 <template>
