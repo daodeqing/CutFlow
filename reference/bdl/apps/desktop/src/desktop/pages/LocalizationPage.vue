@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import UiButton from '../../shared/ui/Button.vue';
+import LocalizationModelInput from './LocalizationModelInput.vue';
 import { cutflow, errorMessage, mediaSource, operationId, type AiModel, type CreationCatalog, type Job } from '../../shared/api/cutflow';
 import { useQueueStore } from '../../shared/stores/queue';
 import { useUiStore } from '../../shared/stores/ui';
 
-type LocalizationResult = { videoPath: string; folderPath: string; subtitlePath: string; title: string; sourceUrl?: string | null; warnings: string[]; reviewRequired: boolean };
+type LocalizationResult = { videoPath: string; folderPath: string; subtitlePath: string; title: string; videoDescription?: string; postText?: string; sourceUrl?: string | null; warnings: string[]; reviewRequired: boolean };
 type LocalizationJob = Omit<Job, 'result'> & { result?: LocalizationResult | null };
 type Watch = { id: string; url: string; title: string; initialized: boolean; pending: unknown[]; issue: string };
 const ui = useUiStore();
@@ -24,6 +25,8 @@ const subtitleModel = ref('');
 const danmakuModel = ref('');
 const speechModel = ref('');
 const postModel = ref('');
+const trendHint = ref('');
+const postBusy = ref(false);
 const transcription = ref<'remote' | 'whisper'>('remote');
 const whisperModel = ref('base');
 const removeBottomText = ref(true);
@@ -31,6 +34,8 @@ const models = ref<AiModel[]>([]);
 const jobs = ref<LocalizationJob[]>([]);
 const selectedJob = ref('');
 const post = ref('');
+const videoDescription = ref('');
+const instruction = ref('');
 const reviewed = ref(false);
 const busy = ref(false);
 const message = ref('');
@@ -71,7 +76,7 @@ async function addWatch() {
   try {
     await cutflow('cutflow.localize.watch.add', { url: watchUrl.value.trim(), model: model.value.trim(), rights: '用户确认享有此来源新增视频的制作及发布权限',
       quality: quality.value, subtitleModel: subtitleModel.value.trim(), danmakuModel: danmakuModel.value.trim(),
-      speechModel: speechModel.value.trim(), postModel: postModel.value.trim(), transcription: transcription.value,
+      speechModel: speechModel.value.trim(), postModel: postModel.value.trim(), trendHint: trendHint.value.trim(), transcription: transcription.value,
       whisperModel: whisperModel.value, removeBottomText: removeBottomText.value });
     watchUrl.value = ''; watchRights.value = false;
     await refreshWatch(); await scanWatches();
@@ -98,11 +103,13 @@ watch(() => ui.localizeTaskId, adoptTask);
 watch(result, (value) => {
   if (!value || initializedPost === selectedJob.value) return;
   initializedPost = selectedJob.value;
-  post.value = [value.title, value.sourceUrl].filter(Boolean).join('\n\n');
+  post.value = [value.postText || value.title, value.sourceUrl].filter(Boolean).join('\n\n');
+  videoDescription.value = value.videoDescription || '';
   reviewed.value = false;
 });
 watch(selectedJob, () => { reviewed.value = false; });
 watch(post, () => { reviewed.value = false; });
+watch(videoDescription, () => { reviewed.value = false; });
 async function start() {
   if (!canStart.value) return;
   busy.value = true; message.value = '';
@@ -111,7 +118,7 @@ async function start() {
       operationId: operationId(), model: model.value.trim(), rights: '用户确认享有制作及发布权限',
       ...(source.value === 'url' ? { url: url.value.trim() } : { taskId: taskId.value }),
       subtitleModel: subtitleModel.value.trim(), danmakuModel: danmakuModel.value.trim(),
-      speechModel: speechModel.value.trim(), postModel: postModel.value.trim(),
+      speechModel: speechModel.value.trim(), postModel: postModel.value.trim(), trendHint: trendHint.value.trim(),
       transcription: transcription.value, whisperModel: whisperModel.value, removeBottomText: removeBottomText.value, quality: quality.value,
     });
     selectedJob.value = response.jobId; initializedPost = '';
@@ -132,6 +139,33 @@ async function openFolder() {
 async function copy(value: string) {
   try { await navigator.clipboard.writeText(value); message.value = '已复制。'; }
   catch { message.value = '无法自动复制，请选中文字手动复制。'; }
+}
+async function regeneratePost() {
+  if (!job.value || !result.value || postBusy.value) return;
+  const id = job.value.id;
+  const previous = post.value;
+  const previousDescription = videoDescription.value;
+  postBusy.value = true; message.value = '';
+  try {
+    const generated = await cutflow<{ postText: string; videoDescription: string }>('cutflow.localize.post', {
+      jobId: id, model: postModel.value.trim() || model.value.trim(), trendHint: trendHint.value.trim(), instruction: instruction.value.trim(),
+    });
+    if (selectedJob.value === id && post.value === previous && videoDescription.value === previousDescription) {
+      post.value = [generated.postText, result.value?.sourceUrl].filter(Boolean).join('\n\n');
+      videoDescription.value = generated.videoDescription;
+      message.value = '简介和推文已重新生成，请审核后使用。';
+    } else { message.value = '简介或推文已变化，本次生成结果没有覆盖你的编辑。'; }
+  } catch (error) { message.value = errorMessage(error); }
+  finally { postBusy.value = false; }
+}
+async function openBrowser() {
+  if (!reviewed.value) return;
+  try { await cutflow('cutflow.x.browser', { text: post.value }); }
+  catch (error) { message.value = errorMessage(error); }
+}
+function cindyUploadPrompt() {
+  if (!result.value) return '';
+  return '请使用 Cindy 连接的浏览器打开 X，确认是我的账号，将下面的视频上传并填入文案，保留给我审核，不要点击发布。\n\n视频路径：' + result.value.videoPath + '\n\n文案：\n' + post.value;
 }
 async function openX() {
   if (!reviewed.value) return;
@@ -160,19 +194,20 @@ onDeactivated(stopPolling); onUnmounted(stopPolling);
         <p class="hint">链接默认处理第一个分 P，画质不足时允许降低；已有下载会复用其可用的独立字幕和弹幕。原始视频不会被覆盖。</p>
         <label class="check-line"><input v-model="rights" type="checkbox" /> 我有权下载、翻译并发布所选视频及其中素材。</label>
         <h2>2. 模型与画面</h2>
-        <label class="field">默认 AI 模型<input v-model="model" list="localization-models" autocomplete="off" /></label>
-        <datalist id="localization-models"><option v-for="item in models" :key="item.id" :value="item.id" /></datalist>
+        <LocalizationModelInput v-model="model" :models="models" label="默认 AI 模型" />
         <details><summary>各步骤分别选择模型</summary><div class="model-fields">
-          <label class="field">字幕翻译<input v-model="subtitleModel" list="localization-models" placeholder="留空使用默认模型" /></label>
-          <label class="field">弹幕翻译<input v-model="danmakuModel" list="localization-models" placeholder="留空使用默认模型" /></label>
-          <label class="field">语音识别<input v-model="speechModel" list="localization-models" placeholder="留空使用默认模型" /></label>
-          <label class="field">英文文案<input v-model="postModel" list="localization-models" placeholder="留空使用默认模型" /></label>
+          <LocalizationModelInput v-model="subtitleModel" :models="models" label="字幕翻译" placeholder="留空使用默认模型" />
+          <LocalizationModelInput v-model="danmakuModel" :models="models" label="弹幕翻译" placeholder="留空使用默认模型" />
+          <LocalizationModelInput v-model="speechModel" :models="models" label="语音识别" placeholder="留空使用默认模型" />
+          <LocalizationModelInput v-model="postModel" :models="models" label="英文文案" placeholder="留空使用默认模型" />
         </div></details>
+        <label class="field">参考的 X 话题（选填）<input v-model="trendHint" maxlength="300" placeholder="粘贴与视频相关的热点或关键词" /></label>
+        <p class="hint">文案基于视频内容生成；未自动获取 X 实时热榜，不会把猜测当作热点。</p>
         <label class="field">没有独立字幕时<select v-model="transcription"><option value="remote">通过所选 AI 服务识别音频</option><option value="whisper">本地 Whisper 识别</option></select></label>
         <label v-if="transcription === 'whisper'" class="field">Whisper 模型<select v-model="whisperModel"><option value="tiny">tiny · 占用较小</option><option value="base">base · 约 141 MiB</option><option value="small">small · 约 465 MiB</option></select></label>
         <p class="hint">AI 服务是否支持音频取决于实际代理；它也可能将请求转发到云端。本地 Whisper 首次使用可能下载模型。</p>
-        <label class="check-line"><input v-model="removeBottomText" type="checkbox" /> 尝试修复画面底部的烧录字幕</label>
-        <p class="hint">此方法可能模糊原画面，无法保证清除滚动弹幕。请在发布前检查成片。</p>
+        <label class="check-line"><input v-model="removeBottomText" type="checkbox" /> 用深色字幕条遮挡底部原字幕</label>
+        <p class="hint">字幕条会遮住画面底部的一小部分，不会拉伸画面；其他位置的烧录文字可能保留。取消勾选可完整保留画面。</p>
         <UiButton type="submit" :disabled="!canStart">{{ busy ? '正在创建…' : '开始制作' }}</UiButton>
         <details class="watch-setup"><summary>自动监控收藏夹 / UP 主</summary>
           <div class="model-fields">
@@ -202,11 +237,19 @@ onDeactivated(stopPolling); onUnmounted(stopPolling);
           <p v-for="warning in result.warnings" :key="warning" class="hint">{{ warning }}</p>
           <label class="field">成片路径<input :value="result.videoPath" readonly @focus="($event.target as HTMLInputElement).select()" /></label>
           <div class="actions"><UiButton variant="secondary" @click="openFolder">打开成片文件夹</UiButton><UiButton variant="secondary" @click="copy(result.videoPath)">复制路径</UiButton></div>
-          <label class="field">英文文案<textarea v-model="post" rows="4" /></label>
-          <UiButton variant="secondary" @click="copy(post)">复制文案</UiButton>
+          <label class="field">视频英文简介<textarea v-model="videoDescription" rows="3" /></label>
+          <UiButton variant="secondary" @click="copy(videoDescription)">复制视频简介</UiButton>
+          <label class="field">X 英文推文<textarea v-model="post" rows="4" /></label>
+          <UiButton variant="secondary" @click="copy(post)">复制推文</UiButton>
+          <label class="field">给 AI 的修改要求<textarea v-model="instruction" rows="2" maxlength="600" placeholder="例如：写得更有悬念，突出施工现场的整洁" /></label>
+          <UiButton variant="secondary" :disabled="postBusy" @click="regeneratePost">{{ postBusy ? '正在生成简介和推文…' : '按要求重新生成简介和推文' }}</UiButton>
           <label class="check-line"><input v-model="reviewed" type="checkbox" /> 我已审核视频、字幕、弹幕和文案，确认发布权限。</label>
-          <UiButton :disabled="!reviewed" @click="openX">打开 X 发布窗口</UiButton>
-          <p class="hint">请在 X 确认个人账号，手动粘贴文案、上传成片并发布。视频时长和大小限制取决于 X 账号；Cindy 的机器人连接不等于个人账号发帖授权。</p>
+          <div class="actions">
+            <UiButton :disabled="!reviewed" @click="openBrowser">用浏览器打开 X 并填写文案</UiButton>
+            <UiButton variant="secondary" :disabled="!reviewed" @click="copy(cindyUploadPrompt())">复制给 Cindy 的上传指令</UiButton>
+            <UiButton variant="secondary" :disabled="!reviewed" @click="openX">打开 CutFlow 内的 X 窗口</UiButton>
+          </div>
+          <p class="hint">浏览器打开后请确认账号并上传视频；也可把指令粘贴给 Cindy，让它在获得浏览器权限后协助上传。最终发布需要你确认，能否上传取决于登录状态、浏览器权限和 X 账号。</p>
         </template>
         <p v-if="message" role="status" class="notice">{{ message }}</p>
       </section>

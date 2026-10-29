@@ -575,6 +575,17 @@ pub fn dispatch(app: &AppHandle, call: Call) -> Result<Value> {
     }
     match method {
         "cutflow.localize.start" => localization_start(app, params),
+        "cutflow.localize.post" => cutflow_workbench::localization::regenerate_post(&hub.runtime, &params),
+        "cutflow.x.browser" => {
+            let text = required(&params, "text")?;
+            if text.len() > 4000 { return Err(Error::new("invalid_request", "文案过长，请缩短后打开 X")); }
+            let mut url = tauri::Url::parse("https://x.com/intent/post")
+                .map_err(|_| Error::new("invalid_request", "X 地址无效"))?;
+            url.query_pairs_mut().append_pair("text", text);
+            app.opener().open_url(url.as_str(), None::<&str>)
+                .map_err(|_| Error::new("platform_error", "无法打开系统浏览器，请手动打开 X"))?;
+            Ok(json!({"opened":true,"prefilledText":true,"automaticUpload":false,"automaticPosting":false}))
+        },
         "cutflow.localize.watch.list" => crate::localize_watch::list(app),
         "cutflow.localize.watch.add" => crate::localize_watch::add(app, &params),
         "cutflow.localize.watch.remove" => crate::localize_watch::remove(app, required(&params, "watchId")?),

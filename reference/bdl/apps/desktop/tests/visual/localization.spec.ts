@@ -10,6 +10,7 @@ for (const theme of ['light', 'dark'] as const) {
       const original = internals.invoke
       internals.invoke = async (command, args) => {
         if (command === 'cutflow_call' && args?.method === 'cutflow.localize.watch.list') return { watches: [] }
+        if (command === 'cutflow_call' && args?.method === 'cutflow.creation.catalog') return { connection: { baseUrl: 'http://127.0.0.1:8317/v1' }, models: [{ id: 'test-model', kind: 'text' }], references: [], fault: null }
         return original(command, args)
       }
     })
@@ -18,6 +19,13 @@ for (const theme of ['light', 'dark'] as const) {
     const section = page.locator('.localize-page')
     await expect(section.getByRole('heading', { name: '英文制作' })).toBeVisible()
     await expect(section.getByRole('button', { name: '开始制作' })).toBeDisabled()
+    await section.getByText('各步骤分别选择模型').click()
+    await section.getByRole('button', { name: '选择字幕翻译模型' }).click()
+    await expect(section.getByRole('listbox', { name: '字幕翻译模型列表' })).toBeVisible()
+    await page.waitForTimeout(3400)
+    await expect(section.getByRole('listbox', { name: '字幕翻译模型列表' })).toBeVisible()
+    await section.getByRole('option', { name: 'test-model' }).click()
+    await expect(section.getByLabel('字幕翻译', { exact: true })).toHaveValue('test-model')
     await section.getByRole('textbox', { name: '视频链接' }).fill('https://www.bilibili.com/video/BV123')
     await section.getByRole('checkbox', { name: '我有权下载、翻译并发布所选视频及其中素材。' }).check()
     await expect(section.getByRole('button', { name: '开始制作' })).toBeEnabled()

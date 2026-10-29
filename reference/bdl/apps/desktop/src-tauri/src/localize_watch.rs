@@ -49,7 +49,7 @@ pub fn add(app: &AppHandle, params: &Value) -> Result<Value> {
     let id = uuid::Uuid::new_v4().to_string();
     let options = json!({"model":model,"rights":params["rights"],"quality":params["quality"].as_str().unwrap_or("80"),
         "subtitleModel":params["subtitleModel"],"danmakuModel":params["danmakuModel"],
-        "speechModel":params["speechModel"],"postModel":params["postModel"],
+        "speechModel":params["speechModel"],"postModel":params["postModel"],"trendHint":params["trendHint"],
         "transcription":params["transcription"].as_str().unwrap_or("remote"),
         "whisperModel":params["whisperModel"].as_str().unwrap_or("base"),
         "removeBottomText":params["removeBottomText"].as_bool().unwrap_or(false)});
