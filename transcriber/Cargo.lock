@@ -133,7 +133,7 @@ dependencies = [
 
 [[package]]
 name = "cutflow-transcribe"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "serde_json",
  "sha2",
