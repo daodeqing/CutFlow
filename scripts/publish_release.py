@@ -67,7 +67,7 @@ def verify_files(directory, package, source, run_id, version):
     with zipfile.ZipFile(directory / names[0]) as archive:
         prefix = package + '/'
         required = ['CutFlow.exe', 'CutFlow-editor.exe', 'tools/concat.exe',
-                    'tools/cutflow-agent.exe', 'tools/bdl.exe', 'tools/ffmpeg.exe',
+                    'tools/cutflow-agent.exe', 'tools/cutflow-transcribe.exe', 'tools/bdl.exe', 'tools/ffmpeg.exe',
                     'tools/ffprobe.exe', 'WebView2/msedgewebview2.exe', 'build-info.json']
         if not all(prefix + name in archive.namelist() for name in required):
             raise RuntimeError('Portable package is missing a required executable or build record')
@@ -75,6 +75,10 @@ def verify_files(directory, package, source, run_id, version):
         if (provenance['commit'] != source['head_sha'] or provenance['version'] != version
                 or str(provenance['cloud_run']) != run_id):
             raise RuntimeError('Portable package does not match the verified source build')
+        component_names = {'CutFlow.exe', 'CutFlow-editor.exe', 'tools/concat.exe',
+                           'tools/cutflow-agent.exe', 'tools/cutflow-transcribe.exe', 'tools/bdl.exe'}
+        if not component_names.issubset(provenance.get('files', {})):
+            raise RuntimeError('Build record is missing a required component checksum')
         for name, record in provenance['files'].items():
             with archive.open(prefix + name) as stream:
                 digest = hashlib.file_digest(stream, 'sha256').hexdigest()
@@ -114,19 +118,18 @@ def publish(directory, tag, run_id, source, package, digests):
         raise RuntimeError('Existing release tag points to another source commit')
     notes = (
         f'CutFlow {tag[1:]} · Windows x64\n\n'
-        'B站素材、独立 Concat 剪辑窗口，以及兼容 OpenAI Chat Completions 的图片和视频创作。'
-        '本版保留标准媒体响应，并配套 GFlow 0.1.19 修复流式生成已完成但客户端长时间等待的问题。\n\n'
-        '- 创作记录直接显示原图，模型选择使用默认收起的悬浮菜单。\n'
-        '- 支持动画和阶段百分比；按处理阶段更新，保存成功才到 100%，并非耗时或像素完成率。\n'
-        '- 4K 选项固定保留，模型或账号未开放时禁用；当前账号能力以刷新结果为准。\n'
-        '- 请同时更新 GFlow 0.1.19，修复宿主流背压等待；插件先返回流响应，再发送进度与原图，兼容 CutFlow 0.6.1。插件安装在代理服务中。\n\n'
-        f'- 安装版：`{package}-setup.exe`，运行安装程序。\n'
-        f'- 便携版：`{package}.zip`，完整解压后运行 `CutFlow.exe`。\n'
-        '- 两种版本选择一种即可，旁边的 `.sha256` 文件用于校验下载。\n'
-        '- 包内包含 WebView2、FFmpeg、编辑器及所需运行库。升级前备份工程和 `portable` 数据。\n\n'
-        f'复用已通过 Windows 构建、双窗口启动和联动检查的[构建产物]({source["html_url"]})。'
-        'B站会员画质下载和真实 AI 生成仍需使用自己的账号及 API 服务验证。\n\n'
-        f'源代码：`{source["head_sha"]}`\n'
+        '从 B 站素材到英文成片：这次把下载、翻译、剪辑和发布审核串进同一个工作台。\n\n'
+        '- 新增英文制作：复用视频字幕或按需语音识别，生成英文字幕、精选英文弹幕、视频简介与 X 推文。\n'
+        '- 默认模型和各步骤模型可分别选择或手动输入；可输入要求单独重新生成简介与推文，无需重做视频。\n'
+        '- 用可选深色字幕条替代底部整片插值，避免出现严重画面拉花；字幕条会遮住底部一部分画面。\n'
+        '- 支持监控指定收藏夹或 UP 主的新视频；程序须保持运行或驻留托盘。\n'
+        '- 审核后可在浏览器打开带文案的 X 发帖页，或把上传指令交给 Cindy；上传与最终发布仍取决于登录、权限和用户确认。\n'
+        '- 更新项目式 AI 创作的任务状态、下载恢复与媒体保存；具体能力取决于模型、账号和服务。\n\n'
+        '使用边界：不自动读取 X 实时热榜；AI 接口可能将内容发送到云端并产生费用。真实账号的 B 站监控、X 上传以及 AI 新图、连续改图、4K 和视频生成仍需按实际账号验收。\n\n'
+        f'- 安装版：`{package}-setup.exe`；便携版：`{package}.zip`，选择一种即可。\n'
+        '- 包内包含 WebView2、FFmpeg、编辑器、语音识别组件及运行库；升级前备份工程和 portable 数据。\n'
+        '- 可选 Whisper 模型首次使用时按需下载；需使用有权下载、改编及发布的视频与音乐。\n\n'
+        f'Windows 完整构建：{source["html_url"]}\n源代码：`{source["head_sha"]}`\n'
     )
     release = github(f'releases/tags/{tag}', missing_ok=True)
     if release is None:

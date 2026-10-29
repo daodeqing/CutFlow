@@ -441,12 +441,33 @@ impl Runtime {
             return Err(Error::new("invalid_request", "所选模型与图片/视频类型不匹配"));
         }
         let capabilities = project.models.as_ref().unwrap_or(&store.models);
-        if let Some(capability) = capabilities.iter().find(|m| m.id == model) {
+        let capability = capabilities.iter().find(|m| m.id == model);
+        // A project response is authoritative even when it explicitly exposes no models.
+        // Older providers without project metadata retain their legacy no-catalog behavior.
+        let authoritative = project.models.is_some()
+            || capabilities.iter().any(|m| m.id.starts_with("gflow-") && m.id != "gflow-project-control");
+        if authoritative && capability.is_none() {
+            return Err(Error::new("invalid_model", "所选模型已不在当前项目可用目录中，请刷新并重新选择"));
+        }
+        if let Some(capability) = capability {
             if capability.kind != "unknown" && capability.kind != kind {
                 return Err(Error::new("invalid_request", "所选模型与生成类型不匹配"));
             }
-            if params["references"].as_array().is_some_and(|references| references.len() > capability.max_references) {
-                return Err(Error::new("invalid_reference", "参考图超过所选模型上限"));
+            let duration = if kind == "video" {
+                match params.get("duration") {
+                    Some(value) => value.as_f64().filter(|value| value.is_finite() && *value > 0.0)
+                        .ok_or_else(|| Error::new("invalid_request", "视频时长必须为有效秒数"))?,
+                    None => capability.duration.unwrap_or(8.0),
+                }
+            } else { 8.0 };
+            let duration_key = duration.to_string();
+            let max_references = capability.max_references_by_duration.as_ref()
+                .and_then(|limits| limits.get(&duration_key)).copied()
+                .unwrap_or(capability.max_references);
+            if params["references"].as_array().is_some_and(|references| references.len() > max_references) {
+                return Err(Error::new("invalid_reference", if max_references == 0 {
+                    "所选模型在当前时长下不支持参考图，请移除参考图或更换时长/模型"
+                } else { "参考图超过所选模型在当前时长下的上限" }));
             }
             if let Some(aspect) = params["aspect_ratio"].as_str().filter(|s| *s != "auto") {
                 if capability.aspects.as_ref().is_some_and(|values| !values.is_empty() && !values.iter().any(|v| v == aspect)) {
@@ -458,10 +479,8 @@ impl Runtime {
                     return Err(Error::new("invalid_request", "所选模型不支持该画质/分辨率"));
                 }
             }
-            if let Some(duration) = params["duration"].as_f64() {
-                if capability.durations.as_ref().is_some_and(|values| !values.is_empty() && !values.contains(&duration)) {
-                    return Err(Error::new("invalid_request", "所选模型不支持该时长"));
-                }
+            if kind == "video" && capability.durations.as_ref().is_some_and(|values| !values.is_empty() && !values.contains(&duration)) {
+                return Err(Error::new("invalid_request", "所选模型不支持该时长"));
             }
         }
         params["gflow_workspace_id"] = json!(store.workspace_id);

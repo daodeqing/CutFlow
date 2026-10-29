@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "cutflow-workbench"
-version = "0.6.5"
+version = "0.6.6"
 dependencies = [
  "base64 0.22.1",
  "bdl-core",
