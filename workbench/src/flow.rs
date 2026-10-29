@@ -23,6 +23,8 @@ pub struct Model {
     pub description: String,
     pub kind: String,
     pub max_references: usize,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub max_references_by_duration: Option<std::collections::BTreeMap<String, usize>>,
     pub duration: Option<f64>,
     pub aspect: Option<String>,
     #[serde(default, skip_serializing_if="Option::is_none")]
@@ -58,6 +60,7 @@ pub fn describe(id: &str, description: &str) -> Model {
         description: description.into(),
         kind: if image { "image" } else if video { "video" } else if text { "text" } else { "unknown" }.into(),
         max_references: references,
+        max_references_by_duration: None,
         duration,
         aspects: None,
         image_sizes: None,
@@ -95,6 +98,13 @@ pub fn base_url(value: &str) -> Result<String> {
         format!("{value}/v1")
     })
 }
+
+// GFlow uses standard data URIs for local media, including videos. Keep the
+// decoded and transport limits aligned; base64 is larger than the saved file.
+pub const MAX_INLINE_MEDIA_BYTES: usize = 128 * 1024 * 1024;
+const MAX_INLINE_MEDIA_ENCODED_BYTES: usize = MAX_INLINE_MEDIA_BYTES.div_ceil(3) * 4;
+const MAX_GENERATION_CONTENT_BYTES: usize = MAX_INLINE_MEDIA_ENCODED_BYTES + 1024 * 1024;
+const MAX_GENERATION_RESPONSE_BYTES: usize = MAX_GENERATION_CONTENT_BYTES + 1024 * 1024;
 
 fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
@@ -148,6 +158,13 @@ pub fn models(connection: &Connection, key: &str) -> Result<Vec<Model>> {
 pub fn apply_model_metadata(model: &mut Model, value: &Value) {
     if let Some(kind) = value["kind"].as_str().filter(|s| matches!(*s, "image" | "video" | "text" | "unknown")) { model.kind = kind.into(); }
     if let Some(max) = value["maxReferences"].as_u64() { model.max_references = max.min(32) as usize; }
+    if let Some(limits) = value["maxReferencesByDuration"].as_object() {
+        model.max_references_by_duration = Some(limits.iter().filter_map(|(duration, limit)| {
+            let seconds = duration.parse::<u32>().ok().filter(|seconds| *seconds > 0)?;
+            let limit = limit.as_u64()?.min(32) as usize;
+            Some((seconds.to_string(), limit))
+        }).collect());
+    }
     model.aspects = value["aspects"].as_array().map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect()).or(model.aspects.take());
     model.image_sizes = value["imageSizes"].as_array().map(|items| items.iter().filter_map(Value::as_str).map(str::to_owned).collect()).or(model.image_sizes.take());
     model.durations = value["durations"].as_array().map(|items| items.iter().filter_map(Value::as_f64).filter(|n| n.is_finite() && *n > 0.0).collect()).or(model.durations.take());
@@ -345,16 +362,65 @@ impl StreamResult {
         if let Some(url) = message.and_then(|message| message["images"][0]["image_url"]["url"].as_str()) {
             self.url = Some(url.into());
         }
-        if self.content.len() + part.len() > 32 * 1024 * 1024 {
+        if self.content.len().saturating_add(part.len()) > MAX_GENERATION_CONTENT_BYTES {
             return Err(Error::new("provider_error", "生成服务响应超过安全长度"));
         }
         self.content.push_str(&part);
         Ok(())
     }
 
+    fn completed_media_url(&self) -> Option<std::borrow::Cow<'_, str>> {
+        use std::borrow::Cow;
+        if let Some(url) = &self.url { return Some(Cow::Borrowed(url)); }
+        // A partial content delta is not a receipt. Inline content must have
+        // its Markdown/HTML closing delimiter before it can be recovered.
+        let mut from = 0;
+        while let Some(offset) = self.content[from..].find("data:") {
+            let start = from + offset;
+            let candidate = &self.content[start..];
+            if let Some(comma) = candidate.find(',').filter(|comma| *comma < 64) {
+                let encoded = &candidate[comma + 1..];
+                let end = encoded.bytes().position(|byte| !byte.is_ascii_alphanumeric() && !b"+/=".contains(&byte)).unwrap_or(encoded.len());
+                if end > 0 && encoded.as_bytes().get(end).is_some_and(|byte| [34, 39, 41].contains(byte)) {
+                    return Some(Cow::Borrowed(&candidate[..comma + 1 + end]));
+                }
+            }
+            from = start + 5;
+        }
+        for pattern in [
+            r#"!\[[^\]]*\]\(([^\s)]+)\)"#,
+            r#"<video\b[^>]*\bsrc\s*=\s*["']([^"']+)["']"#,
+            r#"<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']"#,
+        ] {
+            if let Some(found) = regex::Regex::new(pattern).unwrap().captures(&self.content) {
+                let value = found.get(1)?.as_str();
+                return Some(if value.contains("&amp;") { Cow::Owned(value.replace("&amp;", "&")) } else { Cow::Borrowed(value) });
+            }
+        }
+        None
+    }
+
     pub fn media_url(&self) -> Result<String> {
         if let Some(url) = &self.url {
             return Ok(url.clone());
+        }
+        // Cached video/image results can contain a large standard data URI
+        // inside HTML or Markdown. Read its base64 token directly instead of
+        // running a capture regex over the complete encoded media.
+        let mut search_from = 0;
+        while let Some(offset) = self.content[search_from..].find("data:") {
+            let start = search_from + offset;
+            let candidate = &self.content[start..];
+            for prefix in [
+                "data:image/png;base64,", "data:image/jpeg;base64,", "data:image/webp;base64,",
+                "data:video/mp4;base64,", "data:video/webm;base64,", "data:video/quicktime;base64,",
+            ] {
+                if let Some(encoded) = candidate.strip_prefix(prefix) {
+                    let end = encoded.bytes().position(|byte| !byte.is_ascii_alphanumeric() && !b"+/=".contains(&byte)).unwrap_or(encoded.len());
+                    if end > 0 { return Ok(candidate[..prefix.len() + end].to_string()); }
+                }
+            }
+            search_from = start + "data:".len();
         }
         for pattern in [
             r#"!\[[^\]]*\]\(([^\s)]+)\)"#,
@@ -406,9 +472,31 @@ pub fn check_response(connection: &Connection, key: &str, model: &str) -> Result
     Ok(json!({"model":model,"answer":answer.chars().take(200).collect::<String>(),"verified":true}))
 }
 
+fn sse_event_boundary(buffer: &[u8], mut from: usize) -> Option<(usize, usize)> {
+    while let Some(offset) = buffer.get(from..)?.iter().position(|byte| *byte == b'\n') {
+        let newline = from + offset;
+        let start = if newline > 0 && buffer[newline - 1] == b'\r' { newline - 1 } else { newline };
+        if buffer.get(newline + 1) == Some(&b'\n') { return Some((start, newline + 2 - start)); }
+        if buffer.get(newline + 1..newline + 3) == Some(b"\r\n") {
+            return Some((start, newline + 3 - start));
+        }
+        from = newline + 1;
+    }
+    None
+}
+
 pub fn generate(
     connection: &Connection, key: &str, request: &Value, cancel: &AtomicBool,
-    mut progress: impl FnMut(ProgressUpdate),
+    progress: impl FnMut(ProgressUpdate),
+) -> Result<String> {
+    generate_with_receipt(connection, key, request, cancel, progress, |_| Ok(()))
+}
+
+/// Preserve an already received media receipt if its completion marker is
+/// lost. The request still fails as result_unknown and is never resubmitted.
+pub fn generate_with_receipt(
+    connection: &Connection, key: &str, request: &Value, cancel: &AtomicBool,
+    mut progress: impl FnMut(ProgressUpdate), mut capture: impl FnMut(&str) -> Result<()>,
 ) -> Result<String> {
     let model = crate::required(request, "model")?;
     let prompt = crate::required(request, "prompt")?;
@@ -448,6 +536,7 @@ pub fn generate(
     }
     let runtime = tokio::runtime::Runtime::new().map_err(|e| Error::new("io_error", e.to_string()))?;
     let mut control: Option<Value> = None;
+    let mut result = StreamResult::default();
     let outcome = runtime.block_on(async {
         let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(15)).timeout(Duration::from_secs(1800)).build()
@@ -472,15 +561,15 @@ pub fn generate(
         let streamed = response.headers().get("content-type").and_then(|h| h.to_str().ok()).unwrap_or("").contains("text/event-stream");
         let mut buffer = Vec::new();
         let mut total = 0usize;
-        let mut result = StreamResult::default();
+        let mut event_search_from = 0usize;
         while let Some(chunk) = cancellable(response.chunk(), cancel).await?
             .map_err(|_| Error::new("result_unknown", "响应中断，生成结果待核查"))? {
             total += chunk.len();
-            if total > 40 * 1024 * 1024 { return Err(Error::new("provider_error", "响应超过 40 MiB")); }
+            if total > MAX_GENERATION_RESPONSE_BYTES { return Err(Error::new("provider_error", "生成响应超过 128 MiB 媒体的传输上限，已有云端结果不会自动重发")); }
             buffer.extend_from_slice(&chunk);
             if streamed && status < 400 {
-                while let Some((end, separator)) = buffer.windows(2).position(|w| w == b"\n\n").map(|i| (i, 2))
-                    .or_else(|| buffer.windows(4).position(|w| w == b"\r\n\r\n").map(|i| (i, 4))) {
+                while let Some((end, separator)) = sse_event_boundary(&buffer, event_search_from) {
+                    event_search_from = 0;
                     let event = String::from_utf8_lossy(&buffer[..end]);
                     let data = event.lines().filter_map(|line| line.strip_prefix("data:").map(str::trim_start)).collect::<Vec<_>>().join("\n");
                     if !data.is_empty() {
@@ -498,6 +587,9 @@ pub fn generate(
                     if result.done { break; }
                 }
                 if result.done { break; }
+                // Only recheck a possible split separator. Rescanning a large
+                // base64 event from its start on every network chunk is quadratic.
+                event_search_from = buffer.len().saturating_sub(3);
             }
         }
         if status >= 400 {
@@ -517,6 +609,12 @@ pub fn generate(
         }
         result.media_url()
     });
+    if outcome.as_ref().err().is_some_and(|error| error.code == "result_unknown") {
+        if let Some(media) = result.completed_media_url().filter(|media| validate_received_media(media).is_ok()) {
+            capture(&media).map_err(|error| Error::new("result_unknown",
+                format!("生成结果待核查；已收到媒体，但回执保存失败：{}", error.message.replace(key, "[REDACTED_SECRET]"))))?;
+        }
+    }
     if cancel.load(Ordering::SeqCst) {
         let mut pipe_ack = false;
         #[cfg(windows)]
@@ -558,13 +656,28 @@ pub fn download(
     destination: &Path,
     cancel: &AtomicBool,
 ) -> Result<PathBuf> {
-    if url.starts_with("data:image/") {
-        let (header, encoded) = url.split_once(",").ok_or_else(|| Error::new("invalid_media", "内嵌图片格式无效"))?;
-        let extension = match header { "data:image/png;base64"=>"png", "data:image/jpeg;base64"=>"jpg", "data:image/webp;base64"=>"webp", _=>return Err(Error::new("invalid_media", "内嵌图片类型不支持")) };
-        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|_| Error::new("invalid_media", "内嵌图片编码无效"))?;
-        if bytes.is_empty() || bytes.len() > 32*1024*1024 { return Err(Error::new("invalid_media", "图片为空或超过 32 MiB")); }
-        if cancel.load(Ordering::SeqCst) { return Err(Error::new("cancelled", "图片保存已取消")); }
-        reference_magic(&bytes)?;
+    if url.starts_with("data:") {
+        let (header, encoded) = url.split_once(',').ok_or_else(|| Error::new("invalid_media", "内嵌媒体格式无效"))?;
+        let extension = match header {
+            "data:image/png;base64" => "png", "data:image/jpeg;base64" => "jpg",
+            "data:image/webp;base64" => "webp", "data:video/mp4;base64" => "mp4",
+            "data:video/webm;base64" => "webm", "data:video/quicktime;base64" => "mov",
+            _ => return Err(Error::new("invalid_media", "内嵌媒体类型不支持")),
+        };
+        if cancel.load(Ordering::SeqCst) { return Err(Error::new("cancelled", "媒体保存已取消")); }
+        if encoded.len() > MAX_INLINE_MEDIA_ENCODED_BYTES {
+            return Err(Error::new("invalid_media", "内嵌媒体超过 128 MiB，不会重新提交生成"));
+        }
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).map_err(|_| Error::new("invalid_media", "内嵌媒体编码无效"))?;
+        if bytes.is_empty() || bytes.len() > MAX_INLINE_MEDIA_BYTES {
+            return Err(Error::new("invalid_media", "内嵌媒体为空或超过 128 MiB"));
+        }
+        if header.starts_with("data:image/") {
+            reference_magic(&bytes)?;
+        } else if !video_magic(&bytes, extension) {
+            return Err(Error::new("invalid_media", "返回的内容不是有效视频容器"));
+        }
+        if cancel.load(Ordering::SeqCst) { return Err(Error::new("cancelled", "媒体保存已取消")); }
         let target = destination.with_extension(extension);
         std::fs::create_dir_all(target.parent().ok_or_else(|| Error::new("invalid_media", "目标路径无效"))?)?;
         std::fs::write(&target, bytes)?;
@@ -715,4 +828,59 @@ fn private_ip(address: std::net::IpAddr) -> bool {
 fn reference_magic(bytes: &[u8]) -> Result<()> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") || bytes.starts_with(b"\xff\xd8\xff") || (bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP")) { Ok(()) }
     else { Err(Error::new("invalid_media", "返回的内容不是有效图片")) }
+}
+
+
+fn video_magic(bytes: &[u8], extension: &str) -> bool {
+    match extension {
+        "webm" => bytes.starts_with(b"\x1a\x45\xdf\xa3"),
+        "mp4" => bytes.len() >= 12 && bytes.get(4..8) == Some(b"ftyp"),
+        // Older QuickTime files can start with an atom other than ftyp.
+        "mov" => bytes.len() >= 8 && matches!(bytes.get(4..8), Some(b"ftyp" | b"moov" | b"mdat" | b"wide" | b"free")),
+        _ => false,
+    }
+}
+
+
+// Validate captured data without allocating another decoded copy of a large
+// video. Recovery files remain subject to the regular downloader/probe checks.
+fn validate_received_media(uri: &str) -> Result<()> {
+    if uri.starts_with("data:") {
+        let (header, encoded) = uri.split_once(',').ok_or_else(|| Error::new("invalid_media", "内嵌媒体格式无效"))?;
+        let extension = match header {
+            "data:image/png;base64" => "png", "data:image/jpeg;base64" => "jpg",
+            "data:image/webp;base64" => "webp", "data:video/mp4;base64" => "mp4",
+            "data:video/webm;base64" => "webm", "data:video/quicktime;base64" => "mov",
+            _ => return Err(Error::new("invalid_media", "内嵌媒体类型不支持")),
+        };
+        if encoded.len() > MAX_INLINE_MEDIA_ENCODED_BYTES {
+            return Err(Error::new("invalid_media", "内嵌媒体超过 128 MiB"));
+        }
+        let mut decoder = base64::read::DecoderReader::new(encoded.as_bytes(), &base64::engine::general_purpose::STANDARD);
+        let mut buffer = [0; 8192];
+        let mut prefix = [0; 16];
+        let mut total = 0;
+        loop {
+            let count = decoder.read(&mut buffer).map_err(|_| Error::new("invalid_media", "内嵌媒体编码无效"))?;
+            if count == 0 { break; }
+            if total < prefix.len() {
+                let copied = count.min(prefix.len() - total);
+                prefix[total..total + copied].copy_from_slice(&buffer[..copied]);
+            }
+            total += count;
+            if total > MAX_INLINE_MEDIA_BYTES { return Err(Error::new("invalid_media", "内嵌媒体超过 128 MiB")); }
+        }
+        if total == 0 { return Err(Error::new("invalid_media", "内嵌媒体为空")); }
+        let prefix = &prefix[..total.min(prefix.len())];
+        if header.starts_with("data:image/") { reference_magic(prefix) }
+        else if video_magic(prefix, extension) { Ok(()) }
+        else { Err(Error::new("invalid_media", "内嵌视频容器无效")) }
+    } else {
+        let valid = if uri.starts_with('/') && !uri.starts_with("//") { true } else {
+            url::Url::parse(uri).is_ok_and(|url| matches!(url.scheme(), "http" | "https")
+                && url.host_str().is_some() && url.username().is_empty() && url.password().is_none())
+        };
+        if valid && uri.len() <= 16 * 1024 { Ok(()) }
+        else { Err(Error::new("invalid_media", "媒体地址无效")) }
+    }
 }

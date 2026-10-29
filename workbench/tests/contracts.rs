@@ -111,6 +111,20 @@ fn generation_without_project_uses_public_assets_and_propagates_quota_error() {
     assert!(root.join("generated").join(&job.id).is_dir());
     worker.join().unwrap();
     assert_eq!(runtime.dispatch("cutflow.jobs.retryDownload", json!({"jobId":job.id})).unwrap_err().code, "invalid_request");
+
+    // Once media returns, its durable receipt keeps one copy even if local
+    // probing is unavailable; download-only recovery still uses the same URI.
+    use base64::Engine;
+    let uri = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nreceipt-fixture"));
+    let (connection, worker) = mock(200, "application/json", json!({"url":uri}).to_string());
+    runtime.dispatch("cutflow.connection.save", json!({"baseUrl":connection.base_url})).unwrap();
+    let (job, _, cancel) = runtime.reserve("cutflow.generate", json!({"operationId":"receipt","kind":"image","model":"custom","prompt":"test","maxGenerationCalls":1})).unwrap();
+    assert_eq!(runtime.execute(&job, &cancel).unwrap_err().code, "invalid_media");
+    worker.join().unwrap();
+    let receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("generated").join(&job.id).join("generation-result.json")).unwrap()).unwrap();
+    assert_eq!(receipt["urls"].as_array().unwrap().len(), 1);
+    assert_eq!(receipt["urls"][0], uri);
+    assert!(receipt.get("url").is_none());
 }
 
 #[test]
@@ -525,6 +539,190 @@ fn inline_generated_images_can_be_saved_and_validated() {
     let mut result = StreamResult::default();
     result.event(&json!({"data":[{"b64_json":base64::engine::general_purpose::STANDARD.encode(bytes)}]}).to_string()).unwrap();
     assert_eq!(result.media_url().unwrap(), url);
+}
+
+#[test]
+fn interrupted_stream_keeps_complete_media_for_download_only_without_regeneration() {
+    let root = scratch();
+    let executable = "ffprobe.exe";
+    let tools = std::env::var_os("FFMPEG_DIR").map(PathBuf::from).map(|path| path.join("bin"))
+        .filter(|path| path.join(executable).is_file()).unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap().join("dist/CutFlow/tools")
+        });
+    assert!(tools.join(executable).is_file(), "FFmpeg tools are required for the media recovery integration contract");
+    let runtime = Runtime::open(root.clone(), tools).unwrap();
+    // A real 1x1 PNG, validated by the same ffprobe path used for saved work.
+    let uri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l3sAAAAASUVORK5CYII=";
+    let body = format!("data: {}\n\n", json!({"choices":[{"delta":{"content":format!("![result]({uri})")}}]}));
+    let (connection, worker) = mock(200, "text/event-stream", body);
+    runtime.dispatch("cutflow.connection.save", json!({"baseUrl":connection.base_url,"apiKey":"fixture"})).unwrap();
+    let (job, _, cancel) = runtime.reserve("cutflow.generate", json!({
+        "operationId":"recover-without-done","kind":"image","model":"custom","prompt":"synthetic","maxGenerationCalls":1
+    })).unwrap();
+    let error = runtime.execute(&job, &cancel).unwrap_err();
+    assert_eq!(error.code, "result_unknown");
+    runtime.finish(&job.id, Err(error));
+    assert!(worker.join().unwrap().starts_with("POST /v1/chat/completions "));
+    let before = runtime.dispatch("cutflow.jobs.get", json!({"jobId":job.id})).unwrap();
+    assert_eq!(before["status"], "result_unknown");
+    assert_eq!(before["canRetryDownload"], true);
+    let receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(root.join("generated").join(&job.id).join("generation-result.json")).unwrap()).unwrap();
+    assert_eq!(receipt["urls"][0], uri);
+    assert!(receipt.get("url").is_none());
+    runtime.dispatch("cutflow.jobs.retryDownload", json!({"jobId":job.id})).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let after = loop {
+        let view = runtime.dispatch("cutflow.jobs.get", json!({"jobId":job.id})).unwrap();
+        if view["status"] != "running" { break view; }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert_eq!(after["status"], "completed", "{after}");
+    assert_eq!(after["result"]["assets"][0]["width"], 1);
+    assert_eq!(after["result"]["assets"][0]["height"], 1);
+    assert_eq!(after["canRetryDownload"], false);
+    // The single-request provider has already exited; retry succeeded entirely
+    // from its captured local data URI and could not submit another generation.
+}
+
+#[test]
+fn interrupted_stream_never_captures_partial_invalid_or_unsafe_media() {
+    use base64::Engine;
+    let valid = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nfixture"));
+    for content in [
+        format!("![result]({valid}"), // No closing delimiter: a partial delta.
+        "![result](data:image/png;base64,not-valid-base64)".into(),
+        "![result](data:video/mp4;base64,bm90LWEtdmlkZW8=)".into(),
+        "![result](file:///private/image.png)".into(),
+    ] {
+        let (connection, worker) = mock(200, "text/event-stream", format!("data: {}\n\n", json!({"choices":[{"delta":{"content":content}}]})));
+        let mut captured = false;
+        let error = flow::generate_with_receipt(&connection, "fixture", &json!({"model":"custom","prompt":"synthetic"}), &AtomicBool::new(false), |_| {}, |_| { captured = true; Ok(()) }).unwrap_err();
+        assert_eq!(error.code, "result_unknown");
+        assert!(!captured, "incomplete or invalid media must not become a receipt");
+        worker.join().unwrap();
+    }
+    let (connection, worker) = mock(200, "text/event-stream", format!("data: {}\n\n",
+        json!({"choices":[{"delta":{"content":"<video src=\"https://cdn.example/clip.mp4?one=1&amp;two=2\"></video>"}}]})));
+    let mut received = String::new();
+    let error = flow::generate_with_receipt(&connection, "fixture", &json!({"model":"custom","prompt":"synthetic"}), &AtomicBool::new(false), |_| {}, |media| {
+        received = media.to_string(); Ok(())
+    }).unwrap_err();
+    assert_eq!(error.code, "result_unknown");
+    assert_eq!(received, "https://cdn.example/clip.mp4?one=1&two=2");
+    worker.join().unwrap();
+    let (connection, worker) = mock(200, "text/event-stream", format!("data: {}\n\n", json!({"url":valid})));
+    let error = flow::generate_with_receipt(&connection, "fixture", &json!({"model":"custom","prompt":"synthetic"}), &AtomicBool::new(false), |_| {}, |_| {
+        Err(cutflow_workbench::Error::new("io_error", "synthetic disk failure"))
+    }).unwrap_err();
+    assert_eq!(error.code, "result_unknown");
+    assert!(error.message.contains("回执保存失败"));
+    worker.join().unwrap();
+}
+
+#[test]
+fn model_reference_limits_are_versioned_metadata_and_bounded() {
+    let mut model = flow::describe("gflow-veo-3.1-fast", "");
+    assert!(model.max_references_by_duration.is_none());
+    flow::apply_model_metadata(&mut model, &json!({"maxReferencesByDuration":{
+        "4":2,"6":2,"8":3,"10":999,"0":1,"invalid":3,"12":-1,"14":2.5
+    }}));
+    let limits = model.max_references_by_duration.as_ref().unwrap();
+    assert_eq!(limits.len(), 4);
+    assert_eq!(limits["4"], 2);
+    assert_eq!(limits["8"], 3);
+    assert_eq!(limits["10"], 32);
+    let saved = serde_json::to_value(&model).unwrap();
+    assert_eq!(saved["maxReferencesByDuration"]["4"], 2);
+    flow::apply_model_metadata(&mut model, &json!({}));
+    assert_eq!(model.max_references_by_duration.as_ref().unwrap()["8"], 3);
+}
+
+#[test]
+fn inline_generated_videos_keep_bytes_extensions_and_validate_containers() {
+    use base64::Engine;
+    let root = scratch();
+    let connection = Connection { base_url:"http://localhost/v1".into() };
+    for (mime, extension, bytes) in [
+        ("video/mp4", "mp4", base64::engine::general_purpose::STANDARD.decode("AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAAsRtZGF0AAACnwYF//+b3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDM6MHgxMTMgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTEgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MyBiX3B5cmFtaWQ9MiBiX2FkYXB0PTEgYl9iaWFzPTAgZGlyZWN0PTEgd2VpZ2h0Yj0xIG9wZW5fZ29wPTAgd2VpZ2h0cD0yIGtleWludD0yNTAga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAAFWWIhAAV//7sz34FNc7yL6PyNZtXeQAAAxVtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAD6AABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACP3RyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAEAAAABAAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAA+gAAAAAAAEAAAAAAbdtZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAEAAAABAAFXEAAAAAAAtaGRscgAAAAAAAAAAdmlkZQAAAAAAAAAAAAAAAFZpZGVvSGFuZGxlcgAAAAFibWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAABInN0YmwAAAC+c3RzZAAAAAAAAAABAAAArmF2YzEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAEAAQAEgAAABIAAAAAAAAAAEVTGF2YzYyLjI4LjEwMyBsaWJ4MjY0AAAAAAAAAAAAAAAY//8AAAA0YXZjQwFkAAr/4QAXZ2QACqzZXsBEAAADAAQAAAMACDxIllgBAAZo6+PLIsD9+PgAAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAFeAAAAAAAAAAGHN0dHMAAAAAAAAAAQAAAAEAAEAAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAArwAAAABAAAAFHN0Y28AAAAAAAAAAQAAADAAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYyLjEyLjEwMw==").unwrap()),
+        ("video/webm", "webm", base64::engine::general_purpose::STANDARD.decode("GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAHzEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggElTbuMU6uEHFO7a1OsggHd7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjIuMTIuMTAzV0GNTGF2ZjYyLjEyLjEwM0SJiECPQAAAAAAAFlSua8iuAQAAAAAAAD/XgQFzxYj/efZ7T3dqvJyBACK1nIN1bmSIgQCGhVZfVlA5g4EBI+ODhDuaygDgkLCBELqBEJqBAlWwhFW5gQESVMNnQIBzc6BjwIBnyJpFo4dFTkNPREVSRIeNTGF2ZjYyLjEyLjEwM3Nz2mPAi2PFiP959ntPd2q8Z8ilRaOHRU5DT0RFUkSHmExhdmM2Mi4yOC4xMDMgbGlidnB4LXZwOWfIoUWjiERVUkFUSU9ORIeTMDA6MDA6MDEuMDAwMDAwMDAwAB9DtnWt54EAo6iBAACAgkmDQgAA8AD2ADgkHBhKAAAgIABMh//8VRn//gZB///y5GMAHFO7a5G7j7OBALeK94EB8YIBq/CBAw==").unwrap()),
+        ("video/quicktime", "mov", base64::engine::general_purpose::STANDARD.decode("AAAAFGZ0eXBxdCAgAAACAHF0ICAAAAAId2lkZQAAAsRtZGF0AAACnwYF//+b3EXpvebZSLeWLNgg2SPu73gyNjQgLSBjb3JlIDE2NSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0zIGRlYmxvY2s9MTowOjAgYW5hbHlzZT0weDM6MHgxMTMgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTEgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTIgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MyBiX3B5cmFtaWQ9MiBiX2FkYXB0PTEgYl9iaWFzPTAgZGlyZWN0PTEgd2VpZ2h0Yj0xIG9wZW5fZ29wPTAgd2VpZ2h0cD0yIGtleWludD0yNTAga2V5aW50X21pbj0xIHNjZW5lY3V0PTQwIGludHJhX3JlZnJlc2g9MCByY19sb29rYWhlYWQ9NDAgcmM9Y3JmIG1idHJlZT0xIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1heD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTE6MS4wMACAAAAAFWWIhAAV//7sz34FNc7yL6PyNZtXeQAAAuxtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAD6AABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACV3RyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAEAAAABAAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAA+gAAAAAAAEAAAAAAc9tZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAEAAAABAAH//AAAAAAAtaGRscgAAAABtaGxydmlkZQAAAAAAAAAAAAAAAAxWaWRlb0hhbmRsZXIAAAF6bWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAALGhkbHIAAAAAZGhscnVybCAAAAAAAAAAAAAAAAALRGF0YUhhbmRsZXIAAAAkZGluZgAAABxkcmVmAAAAAAAAAAEAAAAMdXJsIAAAAAEAAAEOc3RibAAAAKpzdHNkAAAAAAAAAAEAAACaYXZjMQAAAAAAAAABAAAAAEZGTVAAAAIAAAACAAAQABAASAAAAEgAAAAAAAAAARVMYXZjNjIuMjguMTAzIGxpYngyNjQAAAAAAAAAAAAAABj//wAAADRhdmNDAWQACv/hABdnZAAKrNlewEQAAAMABAAAAwAIPEiWWAEABmjr48siwP34+AAAAAAQcGFzcAAAAAEAAAABAAAAGHN0dHMAAAAAAAAAAQAAAAEAAEAAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABRzdHN6AAAAAAAAArwAAAABAAAAFHN0Y28AAAAAAAAAAQAAACQAAAAhdWR0YQAAABmpc3dyAA1VxExhdmY2Mi4xMi4xMDM=").unwrap()),
+    ] {
+        let uri = format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+        let path = flow::download(&connection, &uri, &root.join("result.bin"), &AtomicBool::new(false)).unwrap();
+        assert_eq!(path.extension().unwrap(), extension);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+    for uri in [
+        "data:video/mp4;base64,bm90LWEtdmlkZW8=",
+        "data:video/webm;base64,AAAAAGZ0eXBpc29t",
+        "data:text/html;base64,PGh0bWw+",
+        "data:video/mp4;base64,not-base64",
+    ] {
+        assert_eq!(flow::download(&connection, uri, &root.join("bad.bin"), &AtomicBool::new(false)).unwrap_err().code, "invalid_media");
+    }
+    let cancelled = AtomicBool::new(true);
+    assert_eq!(flow::download(&connection, "data:video/mp4;base64,AAAAAGZ0eXBpc29t", &root.join("cancelled.mp4"), &cancelled).unwrap_err().code, "cancelled");
+    assert!(!root.join("cancelled.mp4").exists());
+}
+
+#[test]
+fn large_inline_video_crosses_the_old_stream_limits_without_losing_bytes() {
+    use base64::Engine;
+    let root = scratch();
+    let mut bytes = vec![0; 31 * 1024 * 1024];
+    bytes[..12].copy_from_slice(b"\x00\x00\x00\x18ftypisom");
+    let uri = format!("data:video/mp4;base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+    let body = format!("data: {}\n\ndata: [DONE]\n\n",
+        json!({"choices":[{"delta":{"content":format!("<video src=\"{uri}\"></video>")}}]}));
+    assert!(body.len() > 40 * 1024 * 1024);
+    let (connection, worker) = mock(200, "text/event-stream", body);
+    let media = flow::generate(&connection, "fixture", &json!({"model":"gflow-veo-3.1-fast","prompt":"synthetic"}), &AtomicBool::new(false), |_| {}).unwrap();
+    assert_eq!(media, uri);
+    let path = flow::download(&connection, &media, &root.join("large.bin"), &AtomicBool::new(false)).unwrap();
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    worker.join().unwrap();
+    assert_eq!(flow::MAX_INLINE_MEDIA_BYTES, 128 * 1024 * 1024);
+}
+
+#[test]
+fn mixed_sse_delimiters_preserve_event_order_across_network_chunks() {
+    // An SSE data line and its empty line may each independently use LF or
+    // CRLF. HTTP chunks deliberately split every possible separator position.
+    for separator in ["\n\n", "\r\n\r\n", "\n\r\n", "\r\n\n"] {
+        for split in 1..separator.len() {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let connection = Connection { base_url:format!("http://{}/v1", listener.local_addr().unwrap()) };
+            let first = format!("data: {}{}", json!({"choices":[{"delta":{"content":"![image]("}}]}), &separator[..split]);
+            let second = format!("{}data: {}{separator}data: [DONE]{separator}", &separator[split..],
+                json!({"choices":[{"delta":{"content":"https://cdn.example/image.png)"}}]}));
+            let worker = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+                let mut request = vec![];
+                let mut buffer = [0; 4096];
+                loop {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&buffer[..count]);
+                    if let Some(end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&request[..end]).to_lowercase();
+                        let length = headers.lines().find_map(|line| line.strip_prefix("content-length:").and_then(|value| value.trim().parse::<usize>().ok())).unwrap_or(0);
+                        if request.len() >= end + 4 + length { break; }
+                    }
+                }
+                stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").unwrap();
+                for chunk in [first, second] {
+                    write!(stream, "{:x}\r\n{chunk}\r\n", chunk.len()).unwrap();
+                    stream.flush().unwrap();
+                }
+                stream.write_all(b"0\r\n\r\n").unwrap();
+            });
+            let result = flow::generate(&connection, "fixture", &json!({"model":"custom","prompt":"synthetic"}), &AtomicBool::new(false), |_| {}).unwrap();
+            assert_eq!(result, "https://cdn.example/image.png", "separator={separator:?}, split={split}");
+            worker.join().unwrap();
+        }
+    }
 }
 
 #[test]

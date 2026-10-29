@@ -471,6 +471,8 @@ impl Runtime {
                             model.aspects = model.aspects.take().or_else(|| previous.aspects.clone());
                             model.image_sizes = model.image_sizes.take().or_else(|| previous.image_sizes.clone());
                             model.durations = model.durations.take().or_else(|| previous.durations.clone());
+                            model.max_references_by_duration = model.max_references_by_duration.take()
+                                .or_else(|| previous.max_references_by_duration.clone());
                         }
                     }
                     store.models = models.clone();
@@ -712,14 +714,19 @@ impl Runtime {
                     let mut request = job.params.clone();
                     request["client_request_id"] = json!(format!("{}-{index}", job.id));
                     self.generation_progress(&job.id, index, count, flow::ProgressUpdate::stage("等待生成服务响应", None));
-                    let url = flow::generate(&connection, &key, &request, cancel, |update| {
+                    let url = flow::generate_with_receipt(&connection, &key, &request, cancel, |update| {
                         // Reserve the last 10% of each item for local receipt/download/save.
                         let update = flow::ProgressUpdate::stage(update.stage, update.percent.map(|value| (u16::from(value) * 90 / 100) as u8));
                         self.generation_progress(&job.id, index, count, update);
+                    }, |candidate| {
+                        // 完整媒体已到达但结束回执丢失：只保留下载凭据，任务仍待核查。
+                        let mut received = urls.iter().map(String::as_str).collect::<Vec<_>>();
+                        received.push(candidate);
+                        atomic_json(&folder.join("generation-result.json"), &json!({"urls":received,"model":job.params["model"],"connection":connection}))
                     })?;
                     self.generation_progress(&job.id, index, count, flow::ProgressUpdate::stage("生成结果已返回", Some(90)));
                     urls.push(url);
-                    atomic_json(&folder.join("generation-result.json"), &json!({"urls":urls,"url":urls[0],"model":job.params["model"],"connection":connection}))?;
+                    atomic_json(&folder.join("generation-result.json"), &json!({"urls":urls,"model":job.params["model"],"connection":connection}))?;
                     let partial = self.download_generation(job, &folder, cancel, false)?;
                     {
                         let mut store = self.store.lock().unwrap();
