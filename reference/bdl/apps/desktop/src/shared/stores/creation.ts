@@ -164,7 +164,8 @@ export const useCreationStore = defineStore('creation', () => {
   }
   function mergeJob(job: Job) {
     const previous = jobs.value[job.id];
-    if (previous?.revision && job.revision && previous.revision > job.revision) return;
+    // 本地回执没有版本号，不能把已收到的服务端状态倒退回等待中。
+    if ((previous?.revision || 0) > (job.revision || 0)) return;
     jobs.value[job.id] = job;
     for (const list of Object.values(turns.value)) {
       const turn = list.find((item) => item.jobId === job.id);
@@ -251,6 +252,8 @@ export const useCreationStore = defineStore('creation', () => {
   async function poll() {
     if (polling) return polling;
     polling = (async () => {
+      // 首次活动快照可能漏掉刚从历史中的 running 变为终态的任务。
+      const reconcile = revision.value ? [] : Object.values(jobs.value).filter(active).map((job) => job.id);
       const response = await cutflow<{ jobs: Job[]; revision: number }>(
         'cutflow.jobs.list',
         revision.value ? { sinceRevision: revision.value } : { activeOnly: true },
@@ -271,6 +274,10 @@ export const useCreationStore = defineStore('creation', () => {
           });
         }
       });
+      const received = new Set(response.jobs.map((job) => job.id));
+      await Promise.all(reconcile.filter((id) => !received.has(id)).map(async (jobId) => {
+        mergeJob(await cutflow<Job>('cutflow.jobs.get', { jobId }));
+      }));
       revision.value = response.revision;
     })().finally(() => {
       polling = undefined;

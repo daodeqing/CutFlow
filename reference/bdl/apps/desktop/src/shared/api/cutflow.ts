@@ -9,6 +9,7 @@ export interface AiModel {
   description: string;
   kind: string;
   maxReferences: number;
+  maxReferencesByDuration?: Record<string, number>;
   duration: number | null;
   aspect: string | null;
   aspects?: string[];

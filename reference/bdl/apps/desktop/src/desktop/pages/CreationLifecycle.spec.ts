@@ -59,6 +59,8 @@ interface Fixture {
   jobs: Job[]
   revision: number
   generate?: (params: CallParams, generated: Job) => Promise<{ jobId: string }>
+  createProject?: (params: CallParams) => Promise<CreationProject>
+  retryDownload?: (params: CallParams) => Promise<{ jobId: string; status: string }>
   jobsList?: (params: CallParams) => Promise<{ jobs: Job[]; revision: number }>
 }
 function fixture(): Fixture {
@@ -75,6 +77,9 @@ function install(state: Fixture) {
       case 'cutflow.creation.catalog': return clone(state.catalog)
       case 'cutflow.creation.projects.list': return { projects: clone(state.projects), nextCursor: null }
       case 'cutflow.creation.projects.get': return clone(state.projects.find(item => item.id === p.projectId))
+      case 'cutflow.creation.projects.create':
+        if (state.createProject) return state.createProject(p)
+        throw new Error('Unexpected project creation')
       case 'cutflow.creation.sessions.list': return { sessions: clone(state.sessions.filter(item => item.projectId === p.projectId)), nextCursor: null }
       case 'cutflow.creation.turns.list': return { turns: clone(state.turns[String(p.sessionId)] || []), nextCursor: null }
       case 'cutflow.creation.drafts.save': {
@@ -93,7 +98,7 @@ function install(state: Fixture) {
         return state.generate ? state.generate(p, generated) : { jobId: generated.id }
       }
       case 'cutflow.jobs.cancel': return { requested: true, message: '已请求停止；服务端可能仍在生成和计费' }
-      case 'cutflow.jobs.retryDownload': return { jobId: p.jobId, status: 'running' }
+      case 'cutflow.jobs.retryDownload': return state.retryDownload ? state.retryDownload(p) : { jobId: p.jobId, status: 'running' }
       case 'cutflow.shell.open': return { opened: true }
       default: throw new Error('Unexpected creation API: ' + input.method)
     }
@@ -151,6 +156,51 @@ describe('CutFlow project creation lifecycle', () => {
     expect(useCreationStore().locked).toBe(false)
     await submit(wrapper, '第三张苹果')
     expect(calls('cutflow.generate')).toHaveLength(2)
+  })
+
+  it('does not regress a completed polled turn when its submit acknowledgement arrives late', async () => {
+    const state = fixture(), receipt = deferred<{ jobId: string }>()
+    state.generate = () => receipt.promise
+    install(state)
+    const wrapper = view(); await flushPromises()
+    await submit(wrapper, '已完成的猫')
+    const completed = state.jobs[0]
+    completed.status = 'completed'; completed.revision = ++state.revision
+    completed.result = { assets: [{ path: 'D:/done.png' }] }
+    await useCreationStore().poll(); await flushPromises()
+    receipt.resolve({ jobId: completed.id }); await flushPromises()
+    const store = useCreationStore()
+    expect(store.jobs[completed.id].status).toBe('completed')
+    expect(store.turns['session-a'][0].job.status).toBe('completed')
+    expect(wrapper.get('.turn-assets img').attributes('src')).toBe('D:/done.png')
+    expect(store.locked).toBe(false)
+    await store.poll()
+    expect(store.jobs[completed.id].status).toBe('completed')
+  })
+
+  it('locks repeated download clicks and identifies download-only work until its authoritative completion', async () => {
+    const state = fixture(), receipt = deferred<{ jobId: string; status: string }>()
+    const failed = { ...job('result_unknown'), revision: 10, canRetryDownload: true }
+    state.jobs = [failed]; state.turns['session-a'] = [asTurn(failed)]
+    state.retryDownload = () => receipt.promise
+    install(state)
+    const wrapper = view(); await flushPromises()
+    const retry = namedButton(wrapper, '只重试下载结果')
+    await Promise.all([retry.trigger('click'), retry.trigger('click')]); await flushPromises()
+    expect(calls('cutflow.jobs.retryDownload')).toHaveLength(1)
+    expect(useCreationStore().locked).toBe(true)
+    receipt.resolve({ jobId: failed.id, status: 'running' }); await flushPromises()
+    expect(wrapper.text()).toContain('正在重新下载已生成结果')
+    expect(wrapper.text()).toContain('停止下载')
+    expect(wrapper.text()).not.toContain('停止生成')
+    expect(wrapper.find('[aria-label="停止当前下载"]').exists()).toBe(true)
+    state.jobs[0] = { ...failed, status: 'completed', stage: 'completed', revision: 12,
+      canRetryDownload: false, result: { assets: [{ path: 'D:/recovered.png' }] } }
+    state.revision = 12
+    await tick()
+    expect(useCreationStore().locked).toBe(false)
+    expect(wrapper.get('.turn-assets img').attributes('src')).toBe('D:/recovered.png')
+    expect(calls('cutflow.generate')).toHaveLength(0)
   })
 
   it('keeps cancellation pending and preserves partial assets in the original turn', async () => {
@@ -215,6 +265,50 @@ describe('CutFlow project creation lifecycle', () => {
     expect(calls('cutflow.generate')).toHaveLength(1)
   })
 
+  it('enforces duration-specific video reference limits and explains unsupported references', async () => {
+    const state = fixture()
+    state.catalog.models.push({ ...model('gflow-veo-3.1-quality', 'video'), maxReferences: 0,
+      maxReferencesByDuration: { '4': 2, '6': 2, '8': 0 } })
+    install(state)
+    const wrapper = view(); await flushPromises()
+    await namedButton(wrapper, '视频').trigger('click')
+    const store = useCreationStore()
+    store.draft.model = 'gflow-veo-3.1-quality'; store.draft.duration = '4'
+    await flushPromises()
+    vi.mocked(open).mockResolvedValue(['D:/frame-a.png', 'D:/frame-b.png'])
+    await wrapper.get('[aria-label="添加参考图"]').trigger('click'); await flushPromises()
+    expect(store.draft.references).toHaveLength(2)
+    await wrapper.get('#ai-prompt').setValue('缓慢推近镜头')
+    await wrapper.get('#ai-duration').setValue('8'); await flushPromises()
+    expect(wrapper.text()).toContain('此时长不支持参考图')
+    expect(wrapper.get('[aria-label="发送生成请求"]').attributes('disabled')).toBeDefined()
+    await composer(wrapper).trigger('submit'); await flushPromises()
+    expect(calls('cutflow.generate')).toHaveLength(0)
+    expect(store.draft.references).toEqual(['D:/frame-a.png', 'D:/frame-b.png'])
+    await wrapper.get('#ai-duration').setValue('6')
+    await composer(wrapper).trigger('submit'); await flushPromises()
+    expect(calls('cutflow.generate')[0][1].params).toMatchObject({ duration: 6, references: ['D:/frame-a.png', 'D:/frame-b.png'] })
+  })
+
+  it('uses the eight-second video reference allowance without losing drafts when duration changes', async () => {
+    const state = fixture()
+    state.catalog.models[1] = { ...model('gflow-veo-3.1-lite', 'video'), maxReferences: 2,
+      maxReferencesByDuration: { '4': 2, '6': 2, '8': 3 } }
+    install(state)
+    const wrapper = view(); await flushPromises()
+    await namedButton(wrapper, '视频').trigger('click')
+    vi.mocked(open).mockResolvedValue(['D:/a.png', 'D:/b.png', 'D:/c.png'])
+    await wrapper.get('[aria-label="添加参考图"]').trigger('click'); await flushPromises()
+    const store = useCreationStore()
+    expect(store.draft.references).toHaveLength(3)
+    await wrapper.get('#ai-prompt').setValue('镜头向前')
+    await wrapper.get('#ai-duration').setValue('4'); await flushPromises()
+    expect(wrapper.text()).toContain('最多支持 2 张参考图')
+    expect(store.draft.references).toHaveLength(3)
+    await composer(wrapper).trigger('submit'); await flushPromises()
+    expect(calls('cutflow.generate')).toHaveLength(0)
+  })
+
   it('requires reselection when a catalog model disappears and rejects wrong media categories', async () => {
     const state = fixture(); install(state)
     const wrapper = view(); await flushPromises()
@@ -256,6 +350,32 @@ describe('CutFlow project creation lifecycle', () => {
     enabled.value = true; await flushPromises()
     expect(calls('cutflow.jobs.list')).toHaveLength(baseline + 2)
     expect(calls('cutflow.hub.snapshot')).toHaveLength(0)
+  })
+
+  it('describes unconfirmed project capability without a false loading warning and refreshes after creation', async () => {
+    const state = fixture(), receipt = deferred<CreationProject>()
+    state.catalog.projectBinding = false
+    state.createProject = () => receipt.promise
+    install(state)
+    const wrapper = view(); await flushPromises()
+    await namedButton(wrapper, '新建项目').trigger('click')
+    expect(wrapper.text()).toContain('创建时会核查')
+    expect(wrapper.text()).not.toContain('正在检查项目连接能力')
+    expect(wrapper.text()).not.toContain('请先更新 GFlow 插件')
+    await wrapper.get('#new-project-name').setValue('检查项目')
+    expect(namedButton(wrapper, '创建项目').attributes('disabled')).toBeUndefined()
+    await wrapper.get('form.project-create-form').trigger('submit'); await flushPromises()
+    expect(calls('cutflow.creation.projects.create')).toHaveLength(1)
+    expect(namedButton(wrapper, '正在创建 Flow 项目…').attributes('disabled')).toBeDefined()
+    const baseline = calls('cutflow.creation.catalog').length
+    state.catalog.projectBinding = true
+    receipt.resolve(state.projects[0]); await flushPromises()
+    expect(useCreationStore().catalog.projectBinding).toBe(true)
+    expect(calls('cutflow.creation.catalog')).toHaveLength(baseline + 1)
+    expect(calls('cutflow.creation.catalog').at(-1)?.[1].params).toEqual({ refresh: false })
+    await namedButton(wrapper, '新建项目').trigger('click')
+    expect(wrapper.text()).not.toContain('创建时会核查')
+    expect(calls('cutflow.generate')).toHaveLength(0)
   })
 
   it('clears a recovered catalog fault without fetching the full historical snapshot', async () => {
@@ -348,6 +468,14 @@ describe('CutFlow project creation lifecycle', () => {
     install(state)
     const wrapper = view(); await flushPromises()
     expect(wrapper.get('.turn-assets img').attributes('src')).toBe('D:/movie-thumb.jpg')
+  })
+
+  it('opens AI connection settings directly from the parameter footer', async () => {
+    install(fixture())
+    const wrapper = view(); await flushPromises()
+    await namedButton(wrapper, '连接设置').trigger('click')
+    expect(useUiStore().activeTab).toBe('settings')
+    expect(useUiStore().settingsSection).toBe('settings-ai')
   })
 
   it('starts with a collapsed model popover, closes on selection, and supports Escape', async () => {
