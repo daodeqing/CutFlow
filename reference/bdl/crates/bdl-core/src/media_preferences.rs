@@ -86,7 +86,9 @@ impl VideoPreference {
     }
 }
 
-pub(crate) fn is_sdr(quality: StreamQuality) -> bool {
+/// Whether an existing video quality is classified as SDR by the planner.
+/// Frontends can use the same rule when advertising source-backed choices.
+pub fn is_sdr(quality: StreamQuality) -> bool {
     matches!(
         quality,
         StreamQuality::Quality(16 | 32 | 64 | 74 | 80 | 112 | 116 | 120 | 127)

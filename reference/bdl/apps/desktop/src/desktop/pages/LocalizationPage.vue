@@ -54,6 +54,8 @@ let qualityRequest = 0;
 let refreshing = false;
 let refreshingWatch = false;
 let initializedPost = '';
+let jobsLoaded = false;
+let pendingTaskResult = '';
 const finishedTasks = computed(() => queue.tasks.filter((task) => task.status === 'completed'));
 const job = computed(() => jobs.value.find((item) => item.id === selectedJob.value));
 const active = computed(() => jobs.value.some((item) => item.status === 'running' || item.status === 'queued'));
@@ -69,6 +71,7 @@ const titleError = computed(() => {
 });
 const selectedTask = computed(() => finishedTasks.value.find((task) => task.id === taskId.value));
 const selectedTaskProduced = computed(() => source.value === 'task' && !!selectedTask.value && isTaskProduced(selectedTask.value));
+const selectedTaskResultOpen = computed(() => !!selectedTask.value && completedTaskJob(selectedTask.value)?.id === selectedJob.value);
 const selectedUrlProduced = computed(() => source.value === 'url' && !!url.value.trim() && jobs.value.some((item) =>
   item.status === 'completed' && sameUrl(String(item.params.url || item.result?.sourceUrl || ''), url.value)));
 const youtubeReady = computed(() => !!result.value?.videoPath && !titleError.value && !!videoDescription.value.trim());
@@ -93,8 +96,18 @@ function isTaskProduced(task: Pick<DownloadTask, 'id' | 'output_path'>) {
 function selectTask(task: DownloadTask) {
   taskId.value = task.id;
   if (taskPicker.value) taskPicker.value.open = false;
-  const completed = completedTaskJob(task);
-  if (completed) selectedJob.value = completed.id;
+  requestTaskResult(task.id);
+}
+function requestTaskResult(id: string) {
+  pendingTaskResult = id;
+  selectedJob.value = '';
+  reviewed.value = false;
+  syncPendingTaskResult();
+}
+function syncPendingTaskResult() {
+  if (!pendingTaskResult || !jobsLoaded || source.value !== 'task' || selectedTask.value?.id !== pendingTaskResult) return;
+  selectedJob.value = completedTaskJob(selectedTask.value)?.id || '';
+  pendingTaskResult = '';
 }
 function qualityLabel(value: number) {
   return ({ 127: '8K · 127', 126: '杜比视界 · 126', 125: 'HDR · 125', 120: '4K · 120', 116: '1080p60 · 116', 112: '1080p+ · 112', 80: '1080p · 80', 74: '720p60 · 74', 64: '720p · 64', 32: '480p · 32', 16: '360p · 16' } as Record<number, string>)[value] || `B站画质 ${value}`;
@@ -142,7 +155,9 @@ async function refresh() {
     const response = await cutflow<{ jobs: LocalizationJob[] }>('cutflow.jobs.list');
     jobs.value = response.jobs.filter((item) => item.method === 'cutflow.localize.run').reverse();
     youtubeJobs.value = response.jobs.filter((item) => item.method === 'cutflow.youtube.upload').reverse() as unknown as Job[];
-    if (!selectedJob.value && jobs.value.length) selectedJob.value = jobs.value[0].id;
+    jobsLoaded = true;
+    syncPendingTaskResult();
+    if (source.value !== 'task' && !selectedJob.value && jobs.value.length) selectedJob.value = jobs.value[0].id;
   } catch (error) { message.value = errorMessage(error); }
   finally { refreshing = false; }
 }
@@ -185,8 +200,11 @@ async function load() {
 function adoptTask(id: string) {
   if (!id) return;
   source.value = 'task'; taskId.value = id; ui.localizeTaskId = '';
+  requestTaskResult(id);
 }
 watch(() => ui.localizeTaskId, adoptTask);
+watch([selectedTask, jobs], syncPendingTaskResult);
+watch(source, (value) => { if (value === 'task') requestTaskResult(taskId.value); else pendingTaskResult = ''; });
 watch(url, scheduleQualityProbe);
 function hydrateResult(value: LocalizationResult | null | undefined) {
   if (!value || initializedPost === selectedJob.value) return;
@@ -213,7 +231,7 @@ async function start() {
       speechModel: speechModel.value.trim(), postModel: postModel.value.trim(), trendHint: trendHint.value.trim(),
       transcription: transcription.value, whisperModel: whisperModel.value, removeBottomText: removeBottomText.value, quality: quality.value,
     });
-    selectedJob.value = response.jobId; initializedPost = '';
+    pendingTaskResult = ''; selectedJob.value = response.jobId; initializedPost = '';
     await refresh();
   } catch (error) { message.value = errorMessage(error); }
   finally { busy.value = false; }
@@ -324,7 +342,7 @@ onDeactivated(stopPolling); onUnmounted(() => { stopPolling(); if (qualityTimer)
             </div>
           </details>
         </div>
-        <p v-if="source === 'task' && selectedTaskProduced" class="produced-state" role="status">该下载已完成英文制作；已打开对应成片，重新开始会创建新任务。</p>
+        <p v-if="source === 'task' && selectedTaskProduced" class="produced-state" role="status">该下载已完成英文制作；{{ selectedTaskResultOpen ? '已打开对应成片，' : '' }}重新开始会创建新任务。</p>
         <p v-if="source === 'url'" class="hint quality-message" :data-state="qualityState">{{ qualityMessage }}<span v-if="selectedUrlProduced" class="produced-inline"> · ✓ 已制作</span></p>
         <p class="hint">链接默认处理第一个分 P。明确选择的画质不可用时会提示失败；自动最高按原视频和账号权限选择，不会放大画面。已有下载会复用其可用的独立字幕和弹幕。</p>
         <label class="check-line"><input v-model="rights" type="checkbox" /> 我有权下载、翻译并发布所选视频及其中素材。</label>

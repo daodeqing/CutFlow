@@ -74,7 +74,7 @@ const loadAvailableQualities = async () => {
   qualityNotice.value = '正在读取所选视频和当前账号的真实可用画质…'
   availableVideoQualities.value = [{ label: '各视频的最高可用原画质', value: 'best' }]
   try {
-    const parts: Array<{ partId: string; qualities: number[] }> = []
+    const parts: Array<{ partId: string; qualities: number[]; sdr: boolean }> = []
     for (const sourceId of selectedSourceIds.value) {
       const response = await selectionAvailableQualities({ source_id: sourceId, part_ids: parse.selectionBySource[sourceId] || [] })
       parts.push(...response.parts)
@@ -83,12 +83,17 @@ const loadAvailableQualities = async () => {
     const counts = new Map<number, number>()
     for (const part of parts) for (const value of new Set(part.qualities)) counts.set(value, (counts.get(value) || 0) + 1)
     const entries = [...counts.entries()].sort(([left], [right]) => right - left)
-    availableVideoQualities.value = [{ label: '各视频的最高可用原画质', value: 'best' }, ...entries.map(([value, count]) => ({
+    const sdrCount = parts.filter((part) => part.sdr).length
+    const sdrOption = sdrCount > 0 ? [{
+      value: 'sdr',
+      label: `最高可用 SDR${sdrCount < parts.length ? ` · ${sdrCount}/${parts.length} 个分集可用` : ''}`,
+    }] : []
+    availableVideoQualities.value = [{ label: '各视频的最高可用原画质', value: 'best' }, ...sdrOption, ...entries.map(([value, count]) => ({
       value: String(value),
       label: (videoQualityOptions.find((option) => option.value === String(value))?.label || `B站画质 ${value}`) + (count < parts.length ? ` · ${count}/${parts.length} 个分集可用` : ''),
     }))]
     if (!availableVideoQualities.value.some((option) => option.value === downloadQuality.value)) downloadQuality.value = 'best'
-    qualityNotice.value = entries.length ? `仅显示当前账号能取得的原视频画质；最高档为 ${availableVideoQualities.value[1].label}。` : '未读取到可选视频流；最高画质会在下载前按实际结果选择，不会放大源视频。'
+    qualityNotice.value = entries.length ? `仅显示当前账号能取得的原视频画质；最高档为 ${videoQualityOptions.find((option) => option.value === String(entries[0][0]))?.label || `B站画质 ${entries[0][0]}`}。${sdrCount ? '同时保留实际可用的 SDR 选择。' : ''}` : '未读取到可选视频流；最高画质会在下载前按实际结果选择，不会放大源视频。'
   } catch {
     if (revision === qualitiesRevision) qualityNotice.value = '暂时无法读取具体档位；可使用自动最高画质，或关闭弹窗后重试。'
   } finally {

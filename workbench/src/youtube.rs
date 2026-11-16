@@ -44,6 +44,15 @@ pub fn validate(params: &Value) -> Result<()> {
 }
 pub struct Launch { pub url: String }
 
+/// Stop and forget a prepared bridge when the browser handoff never starts.
+/// The normal `run()` path owns this cleanup after the extension acknowledges
+/// the form, but launch failures happen before that worker is spawned.
+pub fn abort(job_id: &str) {
+    if let Some(state) = bridges().lock().unwrap().remove(job_id) {
+        state.stop.store(true, Ordering::SeqCst);
+    }
+}
+
 pub fn open_current_chrome(address: &str) -> Result<()> {
     #[cfg(windows)]
     {
@@ -89,6 +98,7 @@ fn bridge_loop(listener: TcpListener, state: Arc<BridgeState>) {
         }
     }
     state.stop.store(true, Ordering::SeqCst);
+    bridges().lock().unwrap().remove(&state.job_id);
 }
 fn write_http(mut stream: TcpStream, status: &str, value: &Value) -> Result<()> {
     let body = serde_json::to_vec(value)?;
@@ -96,7 +106,12 @@ fn write_http(mut stream: TcpStream, status: &str, value: &Value) -> Result<()> 
     stream.write_all(&body)?; Ok(())
 }
 fn serve_http(stream: TcpStream, state: &Arc<BridgeState>) -> Result<()> {
+    // The listener is non-blocking so the bridge loop can poll its deadline.
+    // Windows may carry that mode onto accepted sockets; switch the
+    // per-request socket back before waiting for a complete HTTP request.
+    stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut head = String::new(); reader.read_line(&mut head)?;
     let mut content_length = 0usize;
@@ -121,7 +136,10 @@ fn serve_http(stream: TcpStream, state: &Arc<BridgeState>) -> Result<()> {
     }
 }
 pub fn run(runtime: &Runtime, job: &Job, cancel: &std::sync::atomic::AtomicBool) -> Result<Value> {
-    validate(&job.params)?;
+    if let Err(error) = validate(&job.params) {
+        abort(&job.id);
+        return Err(error);
+    }
     let state = bridges().lock().unwrap().get(&job.id).cloned().ok_or_else(|| failure("YouTube 上传桥接已失效，请重新点击上传"))?;
     runtime.update(&job.id, "等待当前 Chrome 的 YouTube 扩展带入成片");
     let outcome = loop {
@@ -139,6 +157,92 @@ pub fn run(runtime: &Runtime, job: &Job, cancel: &std::sync::atomic::AtomicBool)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fixture_state(port: u16) -> Arc<BridgeState> {
+        Arc::new(BridgeState {
+            port,
+            token: "fixture-token".into(),
+            job_id: uuid::Uuid::new_v4().to_string(),
+            video_path: "D:/videos/english.mp4".into(),
+            title: "An English title".into(),
+            description: "An English description".into(),
+            finished: Mutex::new(None),
+            stop: AtomicBool::new(false),
+        })
+    }
+
+    fn fragmented_http_request(path: &str) -> (Value, Arc<BridgeState>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        // Force the inherited Windows mode on every platform so this test
+        // fails even when accept() would otherwise return a blocking socket.
+        stream.set_nonblocking(true).unwrap();
+        let state = fixture_state(listener.local_addr().unwrap().port());
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || serve_http(stream, &worker_state));
+        std::thread::sleep(Duration::from_millis(80));
+        let body = json!({"jobId":state.job_id,"token":state.token,"status":"filled"}).to_string();
+        let header = format!("POST {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n", body.len());
+        let header_middle = header.len() / 2;
+        client.write_all(&header.as_bytes()[..header_middle]).unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+        client.write_all(&header.as_bytes()[header_middle..]).unwrap();
+        let body_middle = body.len() / 2;
+        client.write_all(&body.as_bytes()[..body_middle]).unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+        client.write_all(&body.as_bytes()[body_middle..]).unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        worker.join().unwrap().unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        let value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+        (value, state)
+    }
+
+    #[test]
+    fn claim_waits_for_delayed_and_fragmented_http_bytes() {
+        let (response, state) = fragmented_http_request("/claim");
+        assert_eq!(response["videoPath"], state.video_path);
+        assert_eq!(response["title"], state.title);
+    }
+
+    #[test]
+    fn completion_waits_for_fragmented_body_and_records_ack() {
+        let (response, state) = fragmented_http_request("/complete");
+        assert_eq!(response["accepted"], true);
+        assert!(state.finished.lock().unwrap().as_ref().unwrap().is_ok());
+    }
+
+    #[test]
+    fn aborted_handoff_releases_listener_and_forgets_payload() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let state = fixture_state(address.port());
+        bridges().lock().unwrap().insert(state.job_id.clone(), state.clone());
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || bridge_loop(listener, worker_state));
+        abort(&state.job_id);
+        abort(&state.job_id);
+        assert!(state.stop.load(Ordering::SeqCst));
+        assert!(!bridges().lock().unwrap().contains_key(&state.job_id));
+        worker.join().unwrap();
+        let _reopened = TcpListener::bind(address).unwrap();
+        assert_eq!(Arc::strong_count(&state), 1);
+    }
+
+    #[test]
+    fn stopped_bridge_cleans_registry_without_a_job_worker() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let state = fixture_state(listener.local_addr().unwrap().port());
+        state.stop.store(true, Ordering::SeqCst);
+        bridges().lock().unwrap().insert(state.job_id.clone(), state.clone());
+        bridge_loop(listener, state.clone());
+        assert!(!bridges().lock().unwrap().contains_key(&state.job_id));
+    }
+
     #[test]
     fn title_and_channel_are_checked_before_bridge_creation() {
         let request = json!({"title":"A valid English title","description":"Description","channelUrl":"https://www.youtube.com/@deqingdao/videos","videoPath":"missing.mp4"});

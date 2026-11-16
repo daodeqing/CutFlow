@@ -1,11 +1,13 @@
 import { mount, flushPromises } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
+import { defineComponent, h, KeepAlive, reactive } from 'vue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import LocalizationPage from './LocalizationPage.vue';
+import { useUiStore } from '../../shared/stores/ui';
 const invoke = vi.hoisted(() => vi.fn());
-const queueState = vi.hoisted(() => ({ tasks: [] as Array<{ id: string; title: string; status: string; output_path: string }> }));
+const queueState = vi.hoisted(() => ({ tasks: [] as Array<{ id: string; title: string; status: string; output_path: string }>, list: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke, convertFileSrc: (path: string) => path }));
-vi.mock('../../shared/stores/queue', () => ({ useQueueStore: () => ({ ...queueState, list: async () => {} }) }));
+vi.mock('../../shared/stores/queue', () => ({ useQueueStore: () => reactive(queueState) }));
 const buttons = { UiButton: { template: '<button :disabled="$attrs.disabled" :type="$attrs.type || \'button\'"><slot /></button>' } };
 const wrappers: Array<{ unmount: () => void }> = [];
 const calls = (method: string) => invoke.mock.calls.filter(([, value]) => value.method === method);
@@ -23,15 +25,26 @@ const completed = {
 };
 let savedJobs: unknown[] = [];
 let parsedSource = structuredClone(parsed);
-function openPage() {
-  const wrapper = mount(LocalizationPage, { global: { stubs: buttons } });
+function openPage(keptAlive = false) {
+  const wrapper = mount(keptAlive ? defineComponent({ render: () => h(KeepAlive, () => h(LocalizationPage)) }) : LocalizationPage, { global: { stubs: buttons } });
   wrappers.push(wrapper);
-  return wrapper;
+  return keptAlive ? wrapper.findComponent(LocalizationPage) : wrapper;
+}
+function historicalDownloads() {
+  queueState.tasks = [
+    { id: 'download-a', title: 'Earlier A', status: 'completed', output_path: 'D:\\downloads\\a.mp4' },
+    { id: 'download-b', title: 'Latest B', status: 'completed', output_path: 'D:\\downloads\\b.mp4' },
+  ];
+  const first = { ...completed, id: 'local-a', result: { ...completed.result, sourcePath: 'd:/downloads/a.mp4', videoPath: 'D:/english/a.mp4', title: 'Title A', videoDescription: 'Description A' } };
+  const second = { ...completed, id: 'local-b', params: { taskId: 'download-b' }, result: { ...completed.result, videoPath: 'D:/english/b.mp4', title: 'Title B', videoDescription: 'Description B' } };
+  savedJobs = [first, second];
+  return { first, second };
 }
 beforeEach(() => {
   setActivePinia(createPinia());
   savedJobs = [];
   queueState.tasks = [];
+  queueState.list.mockResolvedValue(undefined);
   parsedSource = structuredClone(parsed);
   invoke.mockImplementation(async (_command: string, input: { method: string }) => {
     switch (input.method) {
@@ -51,7 +64,7 @@ beforeEach(() => {
     }
   });
 });
-afterEach(() => { wrappers.splice(0).forEach((wrapper) => wrapper.unmount()); });
+afterEach(() => { wrappers.splice(0).forEach((wrapper) => wrapper.unmount()); vi.useRealTimers(); });
 describe('English localization', () => {
   it('requires rights and submits the chosen model with the low-storage default', async () => {
     const wrapper = openPage(); await flushPromises();
@@ -148,6 +161,63 @@ describe('English localization', () => {
     await choice.trigger('click');
     expect(wrapper.find('.task-picker summary').classes()).toContain('produced');
     expect(wrapper.find('.produced-state').text()).toContain('已完成英文制作');
+  });
+  it('opens the transfer target after history loads and hands off that exact video', async () => {
+    historicalDownloads();
+    useUiStore().localizeTaskId = 'download-a';
+    const wrapper = openPage(); await flushPromises();
+    expect(wrapper.find('.task-picker summary').text()).toContain('Earlier A');
+    expect(wrapper.find('video').attributes('src')).toBe('D:/english/a.mp4');
+    expect((wrapper.find('input[maxlength="100"]').element as HTMLInputElement).value).toBe('Title A');
+    const checks = wrapper.findAll('input[type=checkbox]');
+    await checks[checks.length - 1].setValue(true);
+    await wrapper.findAll('button').find((button) => button.text() === '上传到 YouTube')!.trigger('click');
+    await flushPromises();
+    expect(calls('cutflow.youtube.upload')[0][1].params).toMatchObject({ videoPath: 'D:/english/a.mp4', title: 'Title A', description: 'Description A' });
+  });
+  it('waits for a delayed queue snapshot instead of falling back to another video', async () => {
+    historicalDownloads();
+    const downloads = queueState.tasks;
+    queueState.tasks = [];
+    let releaseQueue!: () => void;
+    queueState.list.mockImplementation(() => new Promise<void>((resolve) => {
+      releaseQueue = () => { reactive(queueState).tasks = downloads; resolve(); };
+    }));
+    useUiStore().localizeTaskId = 'download-a';
+    const wrapper = openPage(); await flushPromises();
+    expect(wrapper.find('video').exists()).toBe(false);
+    releaseQueue(); await flushPromises();
+    expect(wrapper.find('video').attributes('src')).toBe('D:/english/a.mp4');
+  });
+  it('switches an already mounted page to the requested transfer task and preserves manual history choices', async () => {
+    vi.useFakeTimers();
+    const { first, second } = historicalDownloads();
+    const wrapper = openPage(true); await flushPromises();
+    expect(wrapper.find('video').attributes('src')).toBe('D:/english/b.mp4');
+    useUiStore().localizeTaskId = 'download-a'; await flushPromises();
+    expect(wrapper.find('video').attributes('src')).toBe('D:/english/a.mp4');
+    const history = wrapper.findAll('select').find((select) => select.find('option[value="local-b"]').exists())!;
+    await history.setValue('local-b');
+    expect(wrapper.find('.produced-state').text()).not.toContain('已打开对应成片');
+    savedJobs = [structuredClone(first), structuredClone(second)];
+    await vi.advanceTimersByTimeAsync(3000); await flushPromises();
+    expect(wrapper.find('video').attributes('src')).toBe('D:/english/b.mp4');
+  });
+  it('keeps a newly started remake selected instead of switching back to the completed result', async () => {
+    historicalDownloads();
+    useUiStore().localizeTaskId = 'download-a';
+    const wrapper = openPage(); await flushPromises();
+    const previous = invoke.getMockImplementation()!;
+    invoke.mockImplementation(async (command, input) => {
+      if (input.method === 'cutflow.localize.start') {
+        savedJobs.push({ id: 'new-job', method: 'cutflow.localize.run', params: { taskId: 'download-a' }, status: 'running', stage: 'Rendering remake' });
+      }
+      return previous(command, input);
+    });
+    await wrapper.find('input[type=checkbox]').setValue(true);
+    await wrapper.find('form').trigger('submit'); await flushPromises();
+    expect(wrapper.find('video').exists()).toBe(false);
+    expect(wrapper.text()).toContain('Rendering remake');
   });
   it('only offers streams returned for the selected first part, including real 4K', async () => {
     const part = parsedSource.groups[0].items[0].parts[0];

@@ -586,6 +586,7 @@ pub fn dispatch(app: &AppHandle, call: Call) -> Result<Value> {
                     Err(error) => { runtime.finish(&job.id, Err(error.clone())); return Err(error); }
                 };
                 if let Err(error) = cutflow_workbench::youtube::open_current_chrome(&launch.url) {
+                    cutflow_workbench::youtube::abort(&job.id);
                     runtime.finish(&job.id, Err(error.clone()));
                     return Err(error);
                 }

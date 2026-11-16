@@ -301,10 +301,14 @@ pub async fn selection_available_qualities(
     let parts = prepared.tree.groups.iter().flat_map(|group| &group.items).flat_map(|item| &item.parts)
         .filter(|part| prepared.part_ids.contains(&part.id))
         .map(|part| {
-            let qualities = part.streams.iter().filter(|stream| stream.kind == bdl_core::model::MediaKind::Video && !stream.urls.is_empty())
+            let sdr = part.streams.iter()
+                .filter(|stream| stream.kind == bdl_core::model::MediaKind::Video && !stream.urls.is_empty())
+                .any(|stream| bdl_core::media_preferences::is_sdr(stream.quality));
+            let qualities = part.streams.iter()
+                .filter(|stream| stream.kind == bdl_core::model::MediaKind::Video && !stream.urls.is_empty())
                 .filter_map(|stream| match stream.quality { bdl_core::model::StreamQuality::Quality(value) => Some(value), _ => None })
                 .collect::<std::collections::BTreeSet<_>>();
-            serde_json::json!({"partId":part.id,"qualities":qualities})
+            serde_json::json!({"partId":part.id,"qualities":qualities,"sdr":sdr})
         }).collect::<Vec<_>>();
     Ok(serde_json::json!({"parts":parts}))
 }
