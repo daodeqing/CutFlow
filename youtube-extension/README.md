@@ -10,4 +10,4 @@
 3. 选择 CutFlow 安装目录中的 `youtube-extension` 文件夹。
 4. 在扩展详情中允许它访问 YouTube；首次使用 Chrome 会显示调试权限提示，请选择允许。
 
-使用前先在当前 Chrome 登录目标 YouTube 账号，并打开 `https://www.youtube.com/@deqingdao/videos`。CutFlow 的“上传到 YouTube”按钮会把当前标签页带到 Studio；上传和标题/简介填入完成后仍需要你在 Studio 检查可见性、受众、版权和最终发布按钮。
+使用前先在当前 Chrome 登录目标 YouTube 账号，并打开 `https://www.youtube.com/@deqingdao/videos`。CutFlow 的“上传到 YouTube”按钮会把地址交给已打开的 Chrome 窗口并在当前配置文件中打开新标签，再把该标签带到 Studio；上传和标题/简介填入完成后仍需要你在 Studio 检查可见性、受众、版权和最终发布按钮。

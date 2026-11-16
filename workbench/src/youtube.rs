@@ -59,7 +59,10 @@ pub fn open_current_chrome(address: &str) -> Result<()> {
         let executable = ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"].into_iter()
             .filter_map(std::env::var_os).map(|folder| std::path::PathBuf::from(folder).join("Google/Chrome/Application/chrome.exe"))
             .find(|path| path.is_file()).ok_or_else(|| failure("未找到 Chrome；请安装 Chrome 并加载 CutFlow YouTube 扩展"))?;
-        cutflow_download::process::command(&executable).arg(address)
+        // `--new-tab` keeps an already-open Chrome profile/window in charge of
+        // the handoff. Chrome's single-instance routing then reuses the window
+        // the user just opened instead of creating a second browser window.
+        cutflow_download::process::command(&executable).arg("--new-tab").arg(address)
             .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()
             .map_err(|_| failure("无法打开当前 Chrome，请检查 Chrome 安装"))?;
         Ok(())
