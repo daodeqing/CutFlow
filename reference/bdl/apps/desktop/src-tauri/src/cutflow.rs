@@ -513,7 +513,7 @@ pub(crate) fn localization_start(app: &AppHandle, params: Value) -> Result<Value
                         "operationId":format!("localize-download-{}", running.id),
                         "url":running.params["url"], "rights":running.params["rights"],
                         "parts":running.params["parts"].as_str().unwrap_or("1"),
-                        "quality":running.params["quality"].as_str().unwrap_or("80"), "allowLower":true, "localizationAssets":true
+                        "quality":running.params["quality"].as_str().unwrap_or("best"), "allowLower":running.params["allowLower"].as_bool().unwrap_or(false), "localizationAssets":true
                     }))?;
                     let child_id = response["jobId"].as_str().ok_or_else(|| Error::new("download_error", "下载任务没有返回编号"))?.to_owned();
                     runtime.update(&running.id, "正在下载 B站视频与可用字幕、弹幕");
@@ -546,6 +546,7 @@ pub(crate) fn localization_start(app: &AppHandle, params: Value) -> Result<Value
                 let danmaku = localization_sidecar(&task, bdl_core::queue::DownloadResourceIntent::Danmaku, &["xml"]);
                 let mut resolved = running.clone();
                 resolved.params["videoPath"] = json!(task.output_path);
+                resolved.params["taskId"] = json!(task.id);
                 resolved.params["subtitlePath"] = json!(subtitle);
                 resolved.params["danmakuPath"] = json!(danmaku);
                 resolved.params["title"] = json!(task.title);
@@ -576,6 +577,22 @@ pub fn dispatch(app: &AppHandle, call: Call) -> Result<Value> {
     match method {
         "cutflow.localize.start" => localization_start(app, params),
         "cutflow.localize.post" => cutflow_workbench::localization::regenerate_post(&hub.runtime, &params),
+        "cutflow.youtube.upload" => {
+            let runtime = app.state::<Hub>().runtime.clone();
+            let (job, fresh, cancel) = runtime.reserve("cutflow.youtube.upload", params)?;
+            if fresh {
+                let launch = match cutflow_workbench::youtube::prepare(&job) {
+                    Ok(launch) => launch,
+                    Err(error) => { runtime.finish(&job.id, Err(error.clone())); return Err(error); }
+                };
+                if let Err(error) = cutflow_workbench::youtube::open_current_chrome(&launch.url) {
+                    runtime.finish(&job.id, Err(error.clone()));
+                    return Err(error);
+                }
+                runtime.spawn_reserved(job.clone(), cancel);
+            }
+            Ok(json!({"jobId":job.id,"status":job.status,"automaticUpload":true,"published":false}))
+        },
         "cutflow.x.browser" => {
             let text = required(&params, "text")?;
             if text.len() > 4000 { return Err(Error::new("invalid_request", "文案过长，请缩短后打开 X")); }

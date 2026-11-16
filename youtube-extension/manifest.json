@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "CutFlow YouTube Handoff",
+  "version": "0.1.0",
+  "description": "带入 CutFlow 英文成片、标题和简介，停在 YouTube Studio 发布前审核。",
+  "permissions": ["debugger", "scripting", "storage", "tabs"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://studio.youtube.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": { "service_worker": "service-worker.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*", "https://studio.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": { "default_title": "CutFlow YouTube" }
+}

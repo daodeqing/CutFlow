@@ -3,7 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { computed, ref, watch } from 'vue'
 
 import type { SettingsSnapshot, NamingPreset, DuplicateTaskMatch, DuplicateTaskPolicy, DocumentTreeDirectory } from '../../api/dto'
-import { mobilePickExportDirectory } from '../../api/tauri'
+import { mobilePickExportDirectory, selectionAvailableQualities } from '../../api/tauri'
 import { useParseStore } from '../../stores/parse'
 import { validateNamingTemplate, useSettingsStore } from '../../stores/settings'
 import type { InlineNotice } from '../../stores/feedback'
@@ -36,6 +36,10 @@ const documentTreeOutput = ref<DocumentTreeDirectory | null>(null)
 const rememberDocumentTreeOutput = ref(false)
 const downloadPresetId = ref('')
 const downloadQuality = ref('best')
+const availableVideoQualities = ref<Array<{ label: string; value: string }>>([{ label: '各视频的最高可用原画质', value: 'best' }])
+const qualitiesLoading = ref(false)
+const qualityNotice = ref('')
+let qualitiesRevision = 0
 const missingQuality = ref<SettingsSnapshot['missing_quality_policy']>('lower')
 const selectedPreset = computed(() => settings.saved.download_presets.find((preset) => preset.id === downloadPresetId.value))
 const effectiveOutputExtension = computed(() => selectedPreset.value ? workflowExtension(selectedPreset.value.workflow) : 'mp4')
@@ -64,6 +68,33 @@ const selectedCount = computed(() => parse.isBatch ? parse.selectedBatchEntryIds
 const selectionUnit = computed(() => parse.isBatch ? '个视频' : '个分集')
 const selectionTitle = computed(() => parse.isBatch ? '批量链接' : activeSource.value?.source.title ?? '')
 const activeLoading = computed(() => selectedSourceIds.value.some((sourceId) => parse.loadingBySource[sourceId]))
+const loadAvailableQualities = async () => {
+  const revision = ++qualitiesRevision
+  qualitiesLoading.value = true
+  qualityNotice.value = '正在读取所选视频和当前账号的真实可用画质…'
+  availableVideoQualities.value = [{ label: '各视频的最高可用原画质', value: 'best' }]
+  try {
+    const parts: Array<{ partId: string; qualities: number[] }> = []
+    for (const sourceId of selectedSourceIds.value) {
+      const response = await selectionAvailableQualities({ source_id: sourceId, part_ids: parse.selectionBySource[sourceId] || [] })
+      parts.push(...response.parts)
+    }
+    if (revision !== qualitiesRevision) return
+    const counts = new Map<number, number>()
+    for (const part of parts) for (const value of new Set(part.qualities)) counts.set(value, (counts.get(value) || 0) + 1)
+    const entries = [...counts.entries()].sort(([left], [right]) => right - left)
+    availableVideoQualities.value = [{ label: '各视频的最高可用原画质', value: 'best' }, ...entries.map(([value, count]) => ({
+      value: String(value),
+      label: (videoQualityOptions.find((option) => option.value === String(value))?.label || `B站画质 ${value}`) + (count < parts.length ? ` · ${count}/${parts.length} 个分集可用` : ''),
+    }))]
+    if (!availableVideoQualities.value.some((option) => option.value === downloadQuality.value)) downloadQuality.value = 'best'
+    qualityNotice.value = entries.length ? `仅显示当前账号能取得的原视频画质；最高档为 ${availableVideoQualities.value[1].label}。` : '未读取到可选视频流；最高画质会在下载前按实际结果选择，不会放大源视频。'
+  } catch {
+    if (revision === qualitiesRevision) qualityNotice.value = '暂时无法读取具体档位；可使用自动最高画质，或关闭弹窗后重试。'
+  } finally {
+    if (revision === qualitiesRevision) qualitiesLoading.value = false
+  }
+}
 watch(downloadPresetId, (id) => {
   if (downloadDialogOpen.value && id && id !== settings.saved.selected_download_preset) void settings.saveAppPreferences({ selected_download_preset: id })
 })
@@ -152,6 +183,7 @@ const openDialog = async () => {
   downloadNotice.value = null
   sizeEstimate.value = null
   downloadDialogOpen.value = true
+  void loadAvailableQualities()
 }
 
 defineExpose({ openDialog })
@@ -265,7 +297,7 @@ const chooseDocumentTreeOutput = async () => {
       <div class="grid content-start gap-4">
         <div v-show="activeTab === 'general'" class="grid gap-4">
           <UiSelect v-model="downloadPresetId" label="下载预设" :options="settings.saved.download_presets.map((preset) => ({ label: preset.name, value: preset.id }))" :disabled="activeLoading" helper="在设置 → 下载预设中新增或修改，自动记住上次选择" />
-          <UiSelect v-model="downloadQuality" label="本次下载画质" :options="videoQualityOptions" :disabled="activeLoading" helper="最优画质选择当前账号可下载的最高原视频画质，支持 8K、4K、HDR；不会放大低清源。" />
+          <UiSelect v-model="downloadQuality" label="本次下载画质" :options="availableVideoQualities" :disabled="activeLoading || qualitiesLoading" :helper="qualityNotice" />
           <UiSelect v-model="missingQuality" label="目标画质不可用时" :options="missingQualityOptions" :disabled="activeLoading" />
           <div class="grid gap-2 rounded-lg border border-(--color-border) p-3" aria-label="本次输出预览">
             <strong class="text-sm">将生成</strong>

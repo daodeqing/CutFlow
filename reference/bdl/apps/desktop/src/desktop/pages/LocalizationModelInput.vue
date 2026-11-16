@@ -20,15 +20,18 @@ function closeOnBlur(event: FocusEvent) {
   <div ref="root" class="model-field" @focusout="closeOnBlur" @keydown.esc.stop="open = false">
     <label :for="id">{{ props.label }}</label>
     <div class="model-input">
-      <input :id="id" :value="modelValue" :placeholder="placeholder" autocomplete="off"
+      <input
+        :id="id" :value="modelValue" :placeholder="placeholder" autocomplete="off"
         :aria-expanded="open" :aria-controls="id + '-list'" aria-haspopup="listbox" role="combobox" aria-autocomplete="list"
         @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
         @keydown.down.prevent="open = true" />
-      <button type="button" class="model-toggle" :aria-label="'选择' + label + '模型'"
+      <button
+        type="button" class="model-toggle" :aria-label="'选择' + label + '模型'"
         :aria-expanded="open" :aria-controls="id + '-list'" aria-haspopup="listbox" @click="open = !open">▾</button>
     </div>
     <div v-if="open" :id="id + '-list'" class="model-options" role="listbox" :aria-label="label + '模型列表'">
-      <button v-for="item in models" :key="item.id" type="button" role="option" :aria-selected="modelValue === item.id"
+      <button
+        v-for="item in models" :key="item.id" type="button" role="option" :aria-selected="modelValue === item.id"
         @mousedown.prevent @click="select(item.id)">{{ item.id }}</button>
       <p v-if="models.length === 0">暂无可选模型，可直接输入模型名。</p>
     </div>

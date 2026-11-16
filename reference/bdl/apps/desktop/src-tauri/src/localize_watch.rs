@@ -47,7 +47,7 @@ pub fn add(app: &AppHandle, params: &Value) -> Result<Value> {
     if file.watches.len() >= 20 { return Err(Error::new("invalid_request", "最多监控 20 个来源")); }
     if file.watches.iter().any(|watch| watch.url == url) { return Err(Error::new("operation_conflict", "此来源已在监控列表中")); }
     let id = uuid::Uuid::new_v4().to_string();
-    let options = json!({"model":model,"rights":params["rights"],"quality":params["quality"].as_str().unwrap_or("80"),
+    let options = json!({"model":model,"rights":params["rights"],"quality":params["quality"].as_str().unwrap_or("best"),
         "subtitleModel":params["subtitleModel"],"danmakuModel":params["danmakuModel"],
         "speechModel":params["speechModel"],"postModel":params["postModel"],"trendHint":params["trendHint"],
         "transcription":params["transcription"].as_str().unwrap_or("remote"),
