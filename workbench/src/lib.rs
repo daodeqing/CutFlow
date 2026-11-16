@@ -9,6 +9,7 @@ pub mod server;
 pub mod tasks;
 pub mod timeline;
 pub mod workflow;
+pub mod youtube;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

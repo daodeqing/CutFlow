@@ -282,6 +282,37 @@ pub struct SelectionEstimateSizeRequest {
     pub media_preferences: Option<bdl_core::media_preferences::MediaPreferences>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct SelectionQualitiesRequest {
+    pub source_id: String,
+    pub part_ids: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn selection_available_qualities(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: SelectionQualitiesRequest,
+) -> CommandResult<serde_json::Value> {
+    let source = SourceId(request.source_id);
+    let selected = request.part_ids.into_iter().map(PartId).collect::<Vec<_>>();
+    let prepared = state.prepare_selection(&source, &selected).await?;
+    if prepared.tree_updated { events::emit(&app, events::PARSE_SOURCE_UPDATED, &prepared.tree)?; }
+    let parts = prepared.tree.groups.iter().flat_map(|group| &group.items).flat_map(|item| &item.parts)
+        .filter(|part| prepared.part_ids.contains(&part.id))
+        .map(|part| {
+            let sdr = part.streams.iter()
+                .filter(|stream| stream.kind == bdl_core::model::MediaKind::Video && !stream.urls.is_empty())
+                .any(|stream| bdl_core::media_preferences::is_sdr(stream.quality));
+            let qualities = part.streams.iter()
+                .filter(|stream| stream.kind == bdl_core::model::MediaKind::Video && !stream.urls.is_empty())
+                .filter_map(|stream| match stream.quality { bdl_core::model::StreamQuality::Quality(value) => Some(value), _ => None })
+                .collect::<std::collections::BTreeSet<_>>();
+            serde_json::json!({"partId":part.id,"qualities":qualities,"sdr":sdr})
+        }).collect::<Vec<_>>();
+    Ok(serde_json::json!({"parts":parts}))
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DuplicateTaskMatch {
     pub proposed_task_id: String,

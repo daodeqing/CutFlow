@@ -128,6 +128,7 @@ def build(installer, skip_smoke, component):
                                 ('docs/验收与已知限制.md', '验收与已知限制.md'), ('docs/SOURCE_OFFER.md', 'SOURCE_OFFER.md'),
                                 ('scripts/启动CutFlow.vbs', '启动CutFlow.vbs'), ('examples/draft.json', 'examples/draft.json')]:
         copy(root / source, stage / destination)
+    shutil.copytree(root / 'youtube-extension', stage / 'youtube-extension', dirs_exist_ok=True)
     copy(root / 'reference/bdl/apps/desktop/src-tauri/icons/icon.ico', stage / 'CutFlow.ico')
     (stage / 'portable').mkdir(exist_ok=True)
     if not (stage / 'WebView2/msedgewebview2.exe').is_file():
