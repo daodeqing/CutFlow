@@ -373,6 +373,9 @@ impl Runtime {
         if method == "cutflow.localize.run" && self.store.lock().unwrap().jobs.iter().any(|job| job.method == method && matches!(job.status.as_str(), "queued" | "running")) {
             return Err(Error::new("busy", "已有英文制作任务运行，请等待完成"));
         }
+        if method == "cutflow.youtube.upload" && self.store.lock().unwrap().jobs.iter().any(|job| job.method == method && matches!(job.status.as_str(), "queued" | "running")) {
+            return Err(Error::new("busy", "已有 YouTube 信息带入任务，请先在 Chrome 核查或停止该任务"));
+        }
         let mut store = self.store.lock().unwrap();
         if self.cancels.lock().unwrap().len() >= 4 { return Err(Error::new("busy", "同时最多执行四个后台任务")); }
         if method == "cutflow.generate" {
@@ -422,17 +425,21 @@ impl Runtime {
     pub fn background(&self, method: &str, params: Value) -> Result<Value> {
         let (job, fresh, cancel) = self.reserve(method, params)?;
         if fresh {
-            let runtime = self.clone();
-            let running = job.clone();
-            std::thread::spawn(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    runtime.execute(&running, &cancel)
-                }))
-                .unwrap_or_else(|_| Err(Error::new("interrupted", "后台任务异常结束，请核查结果")));
-                runtime.finish(&running.id, result);
-            });
+            self.spawn_reserved(job.clone(), cancel);
         }
         Ok(json!({"jobId":job.id,"status":job.status}))
+    }
+
+    pub fn spawn_reserved(&self, job: Job, cancel: Arc<AtomicBool>) {
+        let runtime = self.clone();
+        let running = job.clone();
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                runtime.execute(&running, &cancel)
+            }))
+            .unwrap_or_else(|_| Err(Error::new("interrupted", "后台任务异常结束，请核查结果")));
+            runtime.finish(&running.id, result);
+        });
     }
 
     pub fn dispatch(&self, method: &str, params: Value) -> Result<Value> {
@@ -507,7 +514,7 @@ impl Runtime {
                     .map_err(|message| Error::new("download_error", message))?;
                 Ok(json!({"formats":text}))
             }
-            "cutflow.generate" | "cutflow.bilibili.download" | "cutflow.localize.run" => self.background(method, params),
+            "cutflow.generate" | "cutflow.bilibili.download" | "cutflow.localize.run" | "cutflow.youtube.upload" => self.background(method, params),
             "cutflow.jobs.retryDownload" => {
                 let id = required(&params, "jobId")?;
                 let mut job = self.store.lock().unwrap().jobs.iter().find(|job| job.id == id).cloned()
@@ -679,6 +686,7 @@ impl Runtime {
 
     pub fn execute(&self, job: &Job, cancel: &Arc<AtomicBool>) -> Result<Value> {
         if job.method == "cutflow.localize.run" { return crate::localization::run(self, job, cancel); }
+        if job.method == "cutflow.youtube.upload" { return crate::youtube::run(self, job, cancel); }
         let folder = self.output_folder(job)?;
         std::fs::create_dir_all(&folder)?;
         match job.method.as_str() {

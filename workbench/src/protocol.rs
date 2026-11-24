@@ -89,6 +89,7 @@ pub const METHODS: &[(&str, &str)] = &[
     ),
     ("cutflow.localize.run", "将本地视频与字幕、弹幕制作成英文版；需要 operationId、videoPath 和 model，完成后必须审核"),
     ("cutflow.localize.start", "从 B站链接或已完成下载制作英文版；需要 operationId、rights、model 和 url 或 taskId"),
+    ("cutflow.youtube.upload", "打开 YouTube Studio 上传审核；需要 operationId、videoPath、英文 title、description 和已确认的 channelUrl；不会自动点击发布"),
     ("cutflow.x.compose", "打开独立 X 发布窗口；用户自行登录、上传并发布"),
     ("cutflow.localize.watch.list", "列出收藏夹和 UP 主监控及待处理视频"),
     ("cutflow.localize.watch.add", "添加已获授权的收藏夹或 UP 主监控；首次仅建立基线"),
@@ -152,7 +153,7 @@ pub fn tools() -> Value {
             "taskId":{"type":"string"},"watchId":{"type":"string"},"videoPath":{"type":"string"},"subtitlePath":{"type":"string"},"danmakuPath":{"type":"string"},
             "sourceUrl":{"type":"string"},"subtitleModel":{"type":"string"},"danmakuModel":{"type":"string"},"postModel":{"type":"string"},
             "speechModel":{"type":"string"},"transcription":{"enum":["remote","whisper"]},"whisperModel":{"enum":["tiny","base","small"]},
-            "removeBottomText":{"type":"boolean"}
+            "removeBottomText":{"type":"boolean"},"channelUrl":{"type":"string"},"description":{"type":"string"}
         },"additionalProperties":false}
         });
         let fields=match *method {
@@ -166,6 +167,7 @@ pub fn tools() -> Value {
             "cutflow.creation.drafts.save"=>"sessionId kind draft",
             "cutflow.jobs.list"=>"sessionId activeOnly sinceRevision",
             "cutflow.localize.start"=>"operationId model url taskId parts quality rights subtitleModel danmakuModel postModel speechModel transcription whisperModel removeBottomText",
+            "cutflow.youtube.upload"=>"operationId videoPath title description channelUrl",
             "cutflow.x.compose"=>"",
             "cutflow.localize.watch.list"|"cutflow.localize.watch.scan"=>"",
             "cutflow.localize.watch.add"=>"url model rights quality subtitleModel danmakuModel speechModel postModel transcription whisperModel removeBottomText",
@@ -210,6 +212,7 @@ pub fn tools() -> Value {
             "cutflow.bilibili.download"=>"projectPath operationId url rights",
             "cutflow.references.save"=>"kind name path",
             "cutflow.localize.run"=>"operationId videoPath model",
+            "cutflow.youtube.upload"=>"operationId videoPath title description channelUrl",
             "cutflow.localize.start"=>"operationId model rights",
             "cutflow.localize.watch.add"=>"url model rights",
             "cutflow.localize.watch.remove"=>"watchId",
