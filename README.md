@@ -66,7 +66,7 @@
 python -B -X utf8 scripts/build_windows.py --installer
 ```
 
-省略 `--installer` 可只生成便携包。CutFlow 0.6.6 的产物名称为 `CutFlow-0.6.6-windows-x64.zip`，安装版和校验文件随发行版提供。构建包含主程序、编辑器、FFmpeg、ffprobe、语音识别组件、WebView2 和运行库；构建产物未签名。硬件渲染不可用时可使用软件渲染，必要时在启动前设置 `CUTFLOW_RENDERER=software`。
+省略 `--installer` 可只生成便携包。CutFlow 0.6.7 的产物名称为 `CutFlow-0.6.7-windows-x64.zip`，安装版和校验文件随发行版提供。构建包含主程序、编辑器、FFmpeg、ffprobe、语音识别组件、WebView2 和运行库；构建产物未签名。硬件渲染不可用时可使用软件渲染，必要时在启动前设置 `CUTFLOW_RENDERER=software`。
 
 ## 开发与贡献
 
